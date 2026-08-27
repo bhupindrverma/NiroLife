@@ -1,0 +1,18 @@
+const saved = JSON.parse(localStorage.getItem('nirolifePreview') || '{}');
+const practice = saved.practice || 'Your practice';
+const name = saved.name || 'Your care team';
+const type = saved.type || 'Healthcare practice';
+const city = saved.city || 'Your city';
+const services = saved.services || 'Personalised care for every smile.';
+const phone = saved.phone || '';
+const hours = saved.hours || 'Same-week appointments';
+const safe = (value) => String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+document.title = `${practice} — website preview`;
+document.getElementById('heroTitle').innerHTML = `${safe(practice)}<br /><em>starts here.</em>`;
+document.getElementById('heroSub').textContent = `${name} welcomes you to a simpler, more personal care experience.`;
+document.querySelector('.site-top b').innerHTML = `${safe(practice)}<span>${type === 'Dentist' ? 'Dental' : 'Care'}</span>`;
+document.getElementById('cityLabel').textContent = `⌖ ${city}`;
+document.getElementById('hoursLabel').textContent = `◌ ${hours}`;
+document.getElementById('welcomeTitle').textContent = `A warm welcome from ${practice}.`;
+document.getElementById('servicesLabel').textContent = services;
+if (phone) document.getElementById('contactLabel').textContent = `☎ ${phone}`;
