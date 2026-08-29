@@ -1,0 +1,1 @@
+.hero-demo{display:block;overflow:hidden;border-radius:6px;background:#eaf2ee;aspect-ratio:16/9}.hero-demo img{display:block;width:100%;height:100%;object-fit:cover}.browser-card{padding-bottom:9px}@media(max-width:480px){.hero-demo{border-radius:4px}.floating-note{max-width:230px}}
