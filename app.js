@@ -7,9 +7,8 @@ form.addEventListener('submit', (event) => {
   event.preventDefault();
   const data = new FormData(form);
   const practice = data.get('practice') || 'Your practice';
-  const profile = {
-    name: data.get('name'), type: data.get('type'), practice, city: data.get('city'), services: data.get('services'), phone: data.get('phone'), hours: data.get('hours')
-  };
+  const profile = Object.fromEntries(data.entries());
+  profile.practice = practice;
   localStorage.setItem('nirolifePreview', JSON.stringify(profile));
   fetch('/api/practices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profile) })
     .then((response) => response.json())

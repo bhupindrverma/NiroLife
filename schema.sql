@@ -46,3 +46,21 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_subscription_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS enquiries (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  contact_name VARCHAR(160) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  phone VARCHAR(50) NOT NULL,
+  package_name VARCHAR(80) NOT NULL,
+  practice_name VARCHAR(180) NOT NULL,
+  practice_type VARCHAR(100) NULL,
+  specialty VARCHAR(160) NULL,
+  city VARCHAR(120) NULL,
+  message TEXT NULL,
+  preview_json JSON NULL,
+  status ENUM('new','contacted','qualified','won','closed') NOT NULL DEFAULT 'new',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_enquiry_status (status),
+  INDEX idx_enquiry_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

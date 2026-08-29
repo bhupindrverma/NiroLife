@@ -1,0 +1,5 @@
+.generator-form textarea{display:block;width:100%;padding:12px 13px;margin-top:6px;border:1px solid #d5e1db;border-radius:4px;font:inherit;font-size:13px;color:var(--ink);background:#fbfdfb;outline:none;resize:vertical}
+.generator-form textarea:focus{border-color:var(--coral);box-shadow:0 0 0 3px rgba(239,118,93,.1)}
+.form-two{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.pricing-note{text-align:center;color:var(--muted);font-size:11px;margin:25px 0 0}
+@media(max-width:600px){.form-two{grid-template-columns:1fr}}
