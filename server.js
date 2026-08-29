@@ -82,8 +82,34 @@ app.get('/api/health', async (_req, res) => {
   catch (error) { res.status(503).json({ ok: false, database: 'unavailable' }); }
 });
 
-async function readPractices() { try { return JSON.parse(await fs.readFile(practiceFile, 'utf8')); } catch (_error) { return practiceFallback; } }
-async function writePractices(practices) { practiceFallback = practices; await fs.mkdir(dataDir, { recursive: true }); try { await fs.writeFile(practiceFile, JSON.stringify(practices, null, 2)); } catch (_error) { /* Memory fallback remains available. */ } }
+let durableStateReady;
+async function ensureDurableState() {
+  const db = getPool();
+  if (!db) return false;
+  if (!durableStateReady) durableStateReady = db.query('CREATE TABLE IF NOT EXISTS app_state (state_key VARCHAR(80) PRIMARY KEY, state_json LONGTEXT NOT NULL, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4').then(() => true).catch(() => false);
+  return durableStateReady;
+}
+async function readDurableState(key, file, fallback) {
+  const db = getPool();
+  if (db && await ensureDurableState()) {
+    try { const [rows] = await db.query('SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1', [key]); if (rows[0]) return typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json; } catch (_error) { /* File fallback remains available. */ }
+  }
+  try {
+    const fileValue = JSON.parse(await fs.readFile(file, 'utf8'));
+    if (db && await ensureDurableState()) { try { await db.query('INSERT IGNORE INTO app_state (state_key,state_json) VALUES (?,?)', [key, JSON.stringify(fileValue)]); } catch (_error) { /* Continue with the file value. */ } }
+    return fileValue;
+  } catch (_error) { return fallback; }
+}
+async function writeDurableState(key, file, value) {
+  const serialized = JSON.stringify(value);
+  const db = getPool();
+  if (db && await ensureDurableState()) {
+    try { await db.query('INSERT INTO app_state (state_key,state_json) VALUES (?,?) ON DUPLICATE KEY UPDATE state_json=VALUES(state_json)', [key, serialized]); } catch (_error) { /* File copy is still attempted. */ }
+  }
+  try { await fs.mkdir(dataDir, { recursive: true }); await fs.writeFile(file, JSON.stringify(value, null, 2)); } catch (_error) { /* Memory fallback remains available. */ }
+}
+async function readPractices() { return readDurableState('practices', practiceFile, practiceFallback); }
+async function writePractices(practices) { practiceFallback = practices; await writeDurableState('practices', practiceFile, practices); }
 const publicPractice = item => { const { editToken, ...profile } = item; return profile; };
 const escapeHtml = value => String(value || '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 const publicSiteHtml = profile => {
@@ -178,10 +204,10 @@ async function writeEnquiries(enquiries) {
   catch (_error) { /* Memory fallback keeps the live request working. */ }
 }
 
-async function readWorkflows() { try { return JSON.parse(await fs.readFile(workflowFile, 'utf8')); } catch (_error) { return workflowFallback; } }
-async function writeWorkflows(workflows) { workflowFallback = workflows; try { await fs.mkdir(dataDir, { recursive: true }); await fs.writeFile(workflowFile, JSON.stringify(workflows, null, 2)); } catch (_error) { /* Memory fallback remains available. */ } }
-async function readAutomationState() { try { return JSON.parse(await fs.readFile(automationFile, 'utf8')); } catch (_error) { return automationFallback; } }
-async function writeAutomationState(state) { automationFallback = state; try { await fs.mkdir(dataDir, { recursive: true }); await fs.writeFile(automationFile, JSON.stringify(state, null, 2)); } catch (_error) { /* Best effort. */ } }
+async function readWorkflows() { return readDurableState('workflows', workflowFile, workflowFallback); }
+async function writeWorkflows(workflows) { workflowFallback = workflows; await writeDurableState('workflows', workflowFile, workflows); }
+async function readAutomationState() { return readDurableState('automation', automationFile, automationFallback); }
+async function writeAutomationState(state) { automationFallback = state; await writeDurableState('automation', automationFile, state); }
 const workflowFor = (id, workflows, fallbackStatus = 'new') => {
   const savedWorkflow = workflows[String(id)] || {};
   const fallbackStage = fallbackStatus === 'closed' ? 'closed' : fallbackStatus === 'won' ? 'live' : fallbackStatus === 'contacted' ? 'awaiting_customer' : 'manual_review';
@@ -190,14 +216,12 @@ const workflowFor = (id, workflows, fallbackStatus = 'new') => {
 };
 
 async function readEvents() {
-  try { return JSON.parse(await fs.readFile(eventFile, 'utf8')); }
-  catch (_error) { return eventFallback; }
+  return readDurableState('events', eventFile, eventFallback);
 }
 
 async function writeEvents(events) {
-  eventFallback = events;
-  try { await fs.mkdir(dataDir, { recursive: true }); await fs.writeFile(eventFile, JSON.stringify(events.slice(0, 5000), null, 2)); }
-  catch (_error) { /* Analytics remain best-effort if storage is unavailable. */ }
+  eventFallback = events.slice(0, 5000);
+  await writeDurableState('events', eventFile, eventFallback);
 }
 
 async function sendEnquiryEmails(enquiry) {
