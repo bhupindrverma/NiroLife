@@ -26,6 +26,7 @@ const WORKFLOW_STAGES = {
   payment_review: { label: 'Verify payment', nextAction: 'Confirm the payment or payment arrangement, then request onboarding details.', owner: 'admin', manual: true, legacy: 'qualified' },
   onboarding: { label: 'Customer onboarding', nextAction: 'Customer must provide domain, logo, photos and verified practice details.', owner: 'customer', manual: false, legacy: 'qualified' },
   content_approval: { label: 'Approve website content', nextAction: 'Review the completed website and request customer approval.', owner: 'admin', manual: true, legacy: 'qualified' },
+  revision_requested: { label: 'Revisions requested', nextAction: 'Complete the requested revisions, then resend the website for approval.', owner: 'admin', manual: true, legacy: 'qualified' },
   launch_setup: { label: 'Launch setup', nextAction: 'Connect the domain, verify SSL, contact buttons and analytics, then publish.', owner: 'admin', manual: true, legacy: 'won' },
   live: { label: 'Website live', nextAction: 'Automation monitors the website and starts the maintenance schedule.', owner: 'automation', manual: false, legacy: 'won' },
   maintenance: { label: 'Managed maintenance', nextAction: 'Continue scheduled updates, checks and reporting.', owner: 'automation', manual: false, legacy: 'won' },
@@ -36,7 +37,8 @@ const CUSTOMER_STAGE_INFO = {
   awaiting_customer: { label: 'Awaiting your response', nextAction: 'Please reply to the latest NiroLife email if more information was requested.' },
   payment_review: { label: 'Quotation and payment', nextAction: 'Review the quotation below. If you pay manually, report it here so our team can verify it.' },
   onboarding: { label: 'Onboarding', nextAction: 'We are checking your website information and supplied assets.' },
-  content_approval: { label: 'Website approval', nextAction: 'Your updated website will be shared for final approval.' },
+  content_approval: { label: 'Website approval', nextAction: 'Review the website below and either approve it for launch or request revisions.' },
+  revision_requested: { label: 'Revisions in progress', nextAction: 'Your requested revisions are being completed. You will be notified when the website is ready to review again.' },
   launch_setup: { label: 'Launch preparation', nextAction: 'We are connecting the domain and completing launch checks.' },
   live: { label: 'Website live', nextAction: 'Your website has been published.' },
   maintenance: { label: 'Managed maintenance', nextAction: 'Your website is covered by the managed maintenance service.' },
@@ -124,7 +126,7 @@ const workflowFor = (id, workflows, fallbackStatus = 'new') => {
   const savedWorkflow = workflows[String(id)] || {};
   const fallbackStage = fallbackStatus === 'closed' ? 'closed' : fallbackStatus === 'won' ? 'live' : fallbackStatus === 'contacted' ? 'awaiting_customer' : 'manual_review';
   const stage = WORKFLOW_STAGES[savedWorkflow.stage] ? savedWorkflow.stage : fallbackStage;
-  return { stage, ...WORKFLOW_STAGES[stage], notes: savedWorkflow.notes || '', followUpAt: savedWorkflow.followUpAt || '', quoteAmount: savedWorkflow.quoteAmount || '', paymentInstructions: savedWorkflow.paymentInstructions || '', paymentReportedAt: savedWorkflow.paymentReportedAt || '', customerToken: savedWorkflow.customerToken || '', updatedAt: savedWorkflow.updatedAt || '' };
+  return { stage, ...WORKFLOW_STAGES[stage], notes: savedWorkflow.notes || '', followUpAt: savedWorkflow.followUpAt || '', quoteAmount: savedWorkflow.quoteAmount || '', paymentInstructions: savedWorkflow.paymentInstructions || '', paymentReportedAt: savedWorkflow.paymentReportedAt || '', customerToken: savedWorkflow.customerToken || '', finalPreviewUrl: savedWorkflow.finalPreviewUrl || '', revisionFeedback: savedWorkflow.revisionFeedback || '', revisionRequestedAt: savedWorkflow.revisionRequestedAt || '', contentApprovedAt: savedWorkflow.contentApprovedAt || '', launchChecklist: savedWorkflow.launchChecklist || {}, liveUrl: savedWorkflow.liveUrl || '', launchedAt: savedWorkflow.launchedAt || '', updatedAt: savedWorkflow.updatedAt || '' };
 };
 
 async function readEvents() {
@@ -156,7 +158,8 @@ async function sendCustomerStatusEmail(enquiry, workflow, subject = 'Your NiroLi
   const statusUrl = `https://nirolife.com/status.html?token=${encodeURIComponent(workflow.customerToken)}`;
   const quote = workflow.quoteAmount ? `\nConfirmed quotation: ₹${workflow.quoteAmount}` : '';
   const payment = workflow.paymentInstructions ? `\nPayment instructions: ${workflow.paymentInstructions}` : '';
-  await transporter.sendMail({ from: `NiroLife <${process.env.SMTP_USER}>`, to: enquiry.email, subject, text: `Hello ${enquiry.contactName},\n\nYour ${enquiry.practice} website request is now at: ${workflow.label}.\n\nNext step: ${workflow.nextAction}${quote}${payment}\n\nTrack your request securely:\n${statusUrl}\n\nNo payment is confirmed until NiroLife manually verifies it.\n\nNiroLife` });
+  const live = workflow.liveUrl ? `\nLive website: ${workflow.liveUrl}` : '';
+  await transporter.sendMail({ from: `NiroLife <${process.env.SMTP_USER}>`, to: enquiry.email, subject, text: `Hello ${enquiry.contactName},\n\nYour ${enquiry.practice} website request is now at: ${workflow.label}.\n\nNext step: ${workflow.nextAction}${quote}${payment}${live}\n\nTrack your request securely:\n${statusUrl}\n\nNo payment is confirmed until NiroLife manually verifies it.\n\nNiroLife` });
   return true;
 }
 
@@ -214,7 +217,7 @@ app.get('/api/customer/:token', async (req, res) => {
   if (!customer) return res.status(404).json({ error: 'This private tracking link is invalid or no longer available.' });
   const { enquiry, workflow } = customer;
   const customerInfo = CUSTOMER_STAGE_INFO[workflow.stage] || CUSTOMER_STAGE_INFO.manual_review;
-  res.json({ practice: enquiry.practice, contactName: enquiry.contactName, package: enquiry.package, createdAt: enquiry.createdAt, stage: workflow.stage, label: customerInfo.label, nextAction: customerInfo.nextAction, quoteAmount: workflow.quoteAmount, paymentInstructions: workflow.paymentInstructions, paymentReportedAt: workflow.paymentReportedAt, previewUrl: enquiry.preview?.siteSlug ? `/preview.html?site=${encodeURIComponent(enquiry.preview.siteSlug)}` : '' });
+  res.json({ practice: enquiry.practice, contactName: enquiry.contactName, package: enquiry.package, createdAt: enquiry.createdAt, stage: workflow.stage, label: customerInfo.label, nextAction: customerInfo.nextAction, quoteAmount: workflow.quoteAmount, paymentInstructions: workflow.paymentInstructions, paymentReportedAt: workflow.paymentReportedAt, finalPreviewUrl: workflow.finalPreviewUrl || (enquiry.preview?.siteSlug ? `/preview.html?site=${encodeURIComponent(enquiry.preview.siteSlug)}` : ''), revisionFeedback: workflow.revisionFeedback, contentApprovedAt: workflow.contentApprovedAt, liveUrl: workflow.liveUrl, launchedAt: workflow.launchedAt, previewUrl: enquiry.preview?.siteSlug ? `/preview.html?site=${encodeURIComponent(enquiry.preview.siteSlug)}` : '' });
 });
 
 app.post('/api/customer/:token/payment-reported', async (req, res) => {
@@ -230,6 +233,30 @@ app.post('/api/customer/:token/payment-reported', async (req, res) => {
     transporter.sendMail({ from: `NiroLife <${process.env.SMTP_USER}>`, to: process.env.LEAD_EMAIL || process.env.SMTP_USER, subject: `Payment reported: ${customer.enquiry.practice}`, text: `${customer.enquiry.contactName} reported a payment for ${customer.enquiry.practice}.\nReference: ${reference || 'Not supplied'}\nQuoted amount: ₹${stored.quoteAmount}\n\nVerify it manually in the admin dashboard before moving the customer to onboarding.` }).catch(error => console.error('Payment report email failed:', error.message));
   }
   res.json({ reported: true, message: 'Thank you. NiroLife will verify the payment manually.' });
+});
+
+app.post('/api/customer/:token/approval', async (req, res) => {
+  const customer = await findCustomerByToken(req.params.token);
+  if (!customer) return res.status(404).json({ error: 'This private tracking link is invalid or no longer available.' });
+  if (customer.workflow.stage !== 'content_approval') return res.status(400).json({ error: 'This website is not currently awaiting approval.' });
+  const action = req.body?.action;
+  if (!['approve','request_changes'].includes(action)) return res.status(400).json({ error: 'Choose approval or request changes.' });
+  const feedback = typeof req.body?.feedback === 'string' ? req.body.feedback.slice(0, 2000).trim() : '';
+  if (action === 'request_changes' && feedback.length < 5) return res.status(400).json({ error: 'Please describe the requested changes.' });
+  const stored = customer.workflows[customer.id];
+  stored.stage = action === 'approve' ? 'launch_setup' : 'revision_requested';
+  stored.revisionFeedback = action === 'request_changes' ? feedback : '';
+  stored.revisionRequestedAt = action === 'request_changes' ? new Date().toISOString() : stored.revisionRequestedAt || '';
+  stored.contentApprovedAt = action === 'approve' ? new Date().toISOString() : '';
+  stored.launchChecklist = { ...(stored.launchChecklist || {}), approval: action === 'approve' };
+  stored.notes = `${stored.notes || ''}\nCustomer ${action === 'approve' ? 'approved the website for launch' : `requested revisions: ${feedback}`}.`.trim();
+  stored.updatedAt = new Date().toISOString();
+  await writeWorkflows(customer.workflows);
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD) {
+    const transporter = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } });
+    transporter.sendMail({ from: `NiroLife <${process.env.SMTP_USER}>`, to: process.env.LEAD_EMAIL || process.env.SMTP_USER, subject: action === 'approve' ? `Website approved: ${customer.enquiry.practice}` : `Revisions requested: ${customer.enquiry.practice}`, text: action === 'approve' ? `${customer.enquiry.contactName} approved ${customer.enquiry.practice} for launch. Complete the launch checklist in the admin dashboard.` : `${customer.enquiry.contactName} requested revisions for ${customer.enquiry.practice}:\n\n${feedback}\n\nUpdate the website and resend it for approval.` }).catch(error => console.error('Approval email failed:', error.message));
+  }
+  res.json({ saved: true, stage: stored.stage, message: action === 'approve' ? 'Website approved for launch.' : 'Revision request received.' });
 });
 
 app.get('/api/admin/enquiries', async (req, res) => {
@@ -274,6 +301,13 @@ app.patch('/api/admin/enquiries/:id', async (req, res) => {
   const previousStage = workflowFor(req.params.id, workflows, status).stage;
   const quoteAmount = typeof req.body?.quoteAmount === 'string' ? req.body.quoteAmount.replace(/[^0-9,]/g, '').slice(0, 20) : existing.quoteAmount || '';
   const paymentInstructions = typeof req.body?.paymentInstructions === 'string' ? req.body.paymentInstructions.slice(0, 1000) : existing.paymentInstructions || '';
+  const safeUrl = value => typeof value === 'string' && (/^https:\/\//i.test(value) || /^\/[a-z0-9]/i.test(value)) ? value.slice(0, 500) : '';
+  const finalPreviewUrl = typeof req.body?.finalPreviewUrl === 'string' ? safeUrl(req.body.finalPreviewUrl) : existing.finalPreviewUrl || '';
+  const liveUrl = typeof req.body?.liveUrl === 'string' ? (/^https:\/\//i.test(req.body.liveUrl) ? req.body.liveUrl.slice(0, 500) : '') : existing.liveUrl || '';
+  const checklistKeys = ['domain','dns','ssl','contact','forms','analytics','approval'];
+  const launchChecklist = req.body?.launchChecklist && typeof req.body.launchChecklist === 'object' ? checklistKeys.reduce((result, key) => { result[key] = req.body.launchChecklist[key] === true; return result; }, {}) : existing.launchChecklist || {};
+  if (requestedStage === 'content_approval' && !finalPreviewUrl) return res.status(400).json({ error: 'Add the final website preview link before requesting approval.' });
+  if (requestedStage === 'live' && (!liveUrl || !checklistKeys.every(key => launchChecklist[key] === true))) return res.status(400).json({ error: 'Complete every launch check and enter the secure live website URL before marking it live.' });
   workflows[String(req.params.id)] = {
     stage: requestedStage || workflowFor(req.params.id, workflows, status).stage,
     notes: typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 2000) : existing.notes || '',
@@ -282,6 +316,13 @@ app.patch('/api/admin/enquiries/:id', async (req, res) => {
     paymentInstructions,
     paymentReportedAt: existing.paymentReportedAt || '',
     customerToken: existing.customerToken || crypto.randomBytes(24).toString('hex'),
+    finalPreviewUrl,
+    revisionFeedback: requestedStage === 'content_approval' ? '' : existing.revisionFeedback || '',
+    revisionRequestedAt: existing.revisionRequestedAt || '',
+    contentApprovedAt: requestedStage === 'content_approval' ? '' : existing.contentApprovedAt || '',
+    launchChecklist,
+    liveUrl,
+    launchedAt: requestedStage === 'live' ? new Date().toISOString() : existing.launchedAt || '',
     updatedAt: new Date().toISOString()
   };
   await writeWorkflows(workflows);
