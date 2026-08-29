@@ -40,6 +40,7 @@ const claimStatus = document.getElementById('claimStatus');
 document.getElementById('claimButton').addEventListener('click', () => {
   claimPanel.classList.add('open');
   claimPanel.scrollIntoView({ behavior: 'smooth' });
+  if (typeof track === 'function') track('claim_opened', { profession: type });
 });
 claimForm.elements.contactName.value = saved.name || '';
 claimForm.elements.email.value = saved.email || '';
@@ -53,6 +54,7 @@ claimForm.addEventListener('submit', async event => {
     if (!response.ok) throw new Error('Request failed');
     claimStatus.textContent = 'Thank you — your enquiry has been received.';
     claimForm.querySelector('button').disabled = true;
+    if (typeof track === 'function') track('enquiry_sent', { profession: type });
   } catch (_error) {
     claimStatus.textContent = 'Please email help@nirolife.com and we will assist you.';
   }

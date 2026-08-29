@@ -2,6 +2,12 @@ const form = document.getElementById('generatorForm');
 const modal = document.getElementById('previewModal');
 const modalTitle = document.getElementById('previewTitle');
 const closeModal = () => { modal.classList.remove('open'); modal.setAttribute('aria-hidden', 'true'); };
+const requestedType = new URLSearchParams(window.location.search).get('type');
+if (requestedType) {
+  const typeSelect = form.elements.type;
+  const matchingOption = [...typeSelect.options].find(option => option.value.toLowerCase() === requestedType.toLowerCase());
+  if (matchingOption) typeSelect.value = matchingOption.value;
+}
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -17,6 +23,7 @@ form.addEventListener('submit', (event) => {
   modalTitle.textContent = `${practice} website preview`;
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
+  if (typeof track === 'function') track('preview_created', { profession: profile.type });
 });
 
 document.getElementById('modalClose').addEventListener('click', closeModal);

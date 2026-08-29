@@ -8,7 +8,9 @@ const port = process.env.PORT || 3000;
 const publicDir = __dirname;
 const dataDir = path.join(__dirname, 'data');
 const enquiryFile = path.join(dataDir, 'enquiries.json');
+const eventFile = path.join(dataDir, 'events.json');
 let enquiryFallback = [];
+let eventFallback = [];
 
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(publicDir, { extensions: ['html'] }));
@@ -63,6 +65,27 @@ async function writeEnquiries(enquiries) {
   catch (_error) { /* Memory fallback keeps the live request working. */ }
 }
 
+async function readEvents() {
+  try { return JSON.parse(await fs.readFile(eventFile, 'utf8')); }
+  catch (_error) { return eventFallback; }
+}
+
+async function writeEvents(events) {
+  eventFallback = events;
+  try { await fs.mkdir(dataDir, { recursive: true }); await fs.writeFile(eventFile, JSON.stringify(events.slice(0, 5000), null, 2)); }
+  catch (_error) { /* Analytics remain best-effort if storage is unavailable. */ }
+}
+
+app.post('/api/events', async (req, res) => {
+  const { name, page = '/', source = '', profession = '' } = req.body || {};
+  const allowed = ['page_view','generator_start','preview_created','claim_opened','enquiry_sent'];
+  if (!allowed.includes(name)) return res.status(400).json({ error: 'Unsupported event.' });
+  const events = await readEvents();
+  events.unshift({ id: Date.now().toString(36), name, page: String(page).slice(0, 220), source: String(source).slice(0, 120), profession: String(profession).slice(0, 100), createdAt: new Date().toISOString() });
+  await writeEvents(events);
+  res.status(202).json({ recorded: true });
+});
+
 app.post('/api/enquiries', async (req, res) => {
   const { contactName, email, phone, package: selectedPackage, practice, type, specialty, city, message = '', preview = {} } = req.body || {};
   if (!contactName || !email || !phone || !practice) return res.status(400).json({ error: 'Contact name, email, phone and practice are required.' });
@@ -85,6 +108,15 @@ app.get('/api/admin/enquiries', async (req, res) => {
     catch (_error) { /* Fall through to file store. */ }
   }
   res.json(await readEnquiries());
+});
+
+app.get('/api/admin/analytics', async (req, res) => {
+  const adminKey = process.env.ADMIN_KEY;
+  if (!adminKey || req.get('x-admin-key') !== adminKey) return res.status(401).json({ error: 'Invalid admin password.' });
+  const events = await readEvents();
+  const totals = events.reduce((summary, event) => { summary[event.name] = (summary[event.name] || 0) + 1; return summary; }, {});
+  const pages = events.filter(event => event.name === 'page_view').reduce((summary, event) => { summary[event.page] = (summary[event.page] || 0) + 1; return summary; }, {});
+  res.json({ totals, pages, recent: events.slice(0, 50) });
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
