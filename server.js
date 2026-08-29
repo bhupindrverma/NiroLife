@@ -131,7 +131,9 @@ async function sendEnquiryEmails(enquiry) {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD) return false;
   const transporter = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } });
   const adminEmail = process.env.LEAD_EMAIL || process.env.SMTP_USER;
-  const text = `New NiroLife publishing enquiry\n\nPractice: ${enquiry.practice}\nContact: ${enquiry.contactName}\nEmail: ${enquiry.email}\nPhone: ${enquiry.phone}\nPackage: ${enquiry.package}\nCity: ${enquiry.city || ''}\nMessage: ${enquiry.message || ''}`;
+  const onboarding = enquiry.preview?.onboarding || {};
+  const onboardingText = Object.keys(onboarding).length ? `\nDomain: ${onboarding.domain || 'Not decided'}\nOwner: ${onboarding.ownerName || ''}\nQualifications: ${onboarding.qualifications || ''}\nAddress: ${onboarding.address || ''}\nHours: ${onboarding.hours || ''}\nBusiness WhatsApp: ${onboarding.businessWhatsapp || ''}\nServices: ${onboarding.services || ''}\nAssets: ${onboarding.assetsUrl || 'Not provided'}` : '';
+  const text = `New NiroLife publishing enquiry\n\nPractice: ${enquiry.practice}\nContact: ${enquiry.contactName}\nEmail: ${enquiry.email}\nPhone: ${enquiry.phone}\nPackage: ${enquiry.package}\nCity: ${enquiry.city || ''}${onboardingText}\nMessage: ${enquiry.message || ''}`;
   await transporter.sendMail({ from: `NiroLife <${process.env.SMTP_USER}>`, to: adminEmail, replyTo: enquiry.email, subject: `New NiroLife enquiry: ${enquiry.practice}`, text });
   await transporter.sendMail({ from: `NiroLife <${process.env.SMTP_USER}>`, to: enquiry.email, subject: `We received your NiroLife website enquiry`, text: `Hello ${enquiry.contactName},\n\nThank you for requesting help publishing the ${enquiry.practice} website preview. We received your interest in ${enquiry.package}. We will review the information and reply shortly.\n\nThis message confirms an enquiry only; no payment or contract has been created.\n\nNiroLife` });
   return true;
@@ -148,16 +150,22 @@ app.post('/api/events', async (req, res) => {
 });
 
 app.post('/api/enquiries', async (req, res) => {
-  const { contactName, email, phone, package: selectedPackage, addOns = '', practice, type, specialty, city, message = '', preview = {} } = req.body || {};
+  const { contactName, email, phone, package: selectedPackage, addOns = '', practice, type, specialty, city, message = '', onboarding = {}, preview = {} } = req.body || {};
   if (!contactName || !email || !phone || !practice) return res.status(400).json({ error: 'Contact name, email, phone and practice are required.' });
-  const enquiry = { id: Date.now().toString(36), contactName, email, phone, package: selectedPackage || 'Not sure yet', practice, type, specialty, city, message: [message, addOns ? `Add-ons: ${addOns}` : ''].filter(Boolean).join('\n'), preview, status: 'new', createdAt: new Date().toISOString() };
+  const safeOnboarding = ['domain','ownerName','qualifications','address','hours','businessWhatsapp','services','assetsUrl'].reduce((result, key) => { if (typeof onboarding[key] === 'string') result[key] = onboarding[key].slice(0, key === 'services' ? 1500 : 500); return result; }, {});
+  if (safeOnboarding.assetsUrl && !/^https:\/\//i.test(safeOnboarding.assetsUrl)) safeOnboarding.assetsUrl = '';
+  safeOnboarding.verified = onboarding.verified === true;
+  const selected = selectedPackage || 'Not sure yet';
+  if (selected !== 'Free Preview' && !safeOnboarding.verified) return res.status(400).json({ error: 'Please confirm that the submitted business information is authorised and accurate.' });
+  const enquiry = { id: Date.now().toString(36), contactName: String(contactName).slice(0,120), email: String(email).slice(0,180), phone: String(phone).slice(0,60), package: String(selected).slice(0,80), practice: String(practice).slice(0,180), type, specialty, city, message: [String(message).slice(0,1500), addOns ? `Add-ons: ${String(addOns).slice(0,500)}` : ''].filter(Boolean).join('\n'), preview: { ...preview, onboarding: safeOnboarding }, status: 'new', createdAt: new Date().toISOString() };
   const db = getPool();
   if (db) {
-    try { const [insertResult] = await db.query('INSERT INTO enquiries (contact_name,email,phone,package_name,practice_name,practice_type,specialty,city,message,preview_json,status) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [contactName, email, phone, enquiry.package, practice, type || '', specialty || '', city || '', enquiry.message, JSON.stringify(preview), 'new']); enquiry.id = String(insertResult.insertId || enquiry.id); }
+    try { const [insertResult] = await db.query('INSERT INTO enquiries (contact_name,email,phone,package_name,practice_name,practice_type,specialty,city,message,preview_json,status) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [enquiry.contactName, enquiry.email, enquiry.phone, enquiry.package, enquiry.practice, type || '', specialty || '', city || '', enquiry.message, JSON.stringify(enquiry.preview), 'new']); enquiry.id = String(insertResult.insertId || enquiry.id); }
     catch (_error) { const enquiries = await readEnquiries(); enquiries.unshift(enquiry); await writeEnquiries(enquiries); }
   } else { const enquiries = await readEnquiries(); enquiries.unshift(enquiry); await writeEnquiries(enquiries); }
   const workflows = await readWorkflows();
-  workflows[String(enquiry.id)] = { stage: 'manual_review', notes: '', followUpAt: '', updatedAt: new Date().toISOString() };
+  const initialStage = selected === 'Free Preview' ? 'awaiting_customer' : 'payment_review';
+  workflows[String(enquiry.id)] = { stage: initialStage, notes: selected === 'Free Preview' ? 'Free preview request saved. No payment required.' : 'Onboarding details received. Confirm scope and payment before starting work.', followUpAt: '', updatedAt: new Date().toISOString() };
   await writeWorkflows(workflows);
   sendEnquiryEmails(enquiry).catch(error => console.error('Enquiry email failed:', error.message));
   res.status(201).json({ saved: true, id: enquiry.id, emailQueued: Boolean(process.env.SMTP_HOST && process.env.SMTP_PASSWORD) });
