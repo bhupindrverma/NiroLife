@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 560" role="img" aria-labelledby="title desc">
+  <title id="title">Healthcare website design preview</title>
+  <desc id="desc">A lightweight illustration of a healthcare website displayed on a laptop and phone.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e4f3ec"/><stop offset="1" stop-color="#f8eee8"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#173b3a" flood-opacity=".14"/></filter>
+  </defs>
+  <rect width="800" height="560" rx="42" fill="url(#bg)"/>
+  <circle cx="680" cy="90" r="46" fill="#fff" opacity=".65"/>
+  <circle cx="108" cy="462" r="62" fill="#fff" opacity=".5"/>
+  <g filter="url(#shadow)">
+    <rect x="92" y="86" width="560" height="350" rx="20" fill="#173b3a"/>
+    <rect x="108" y="102" width="528" height="314" rx="10" fill="#fff"/>
+    <rect x="108" y="102" width="528" height="46" rx="10" fill="#eef6f2"/>
+    <circle cx="135" cy="125" r="6" fill="#d88969"/><circle cx="155" cy="125" r="6" fill="#e8bd69"/><circle cx="175" cy="125" r="6" fill="#4b9b83"/>
+    <rect x="135" y="180" width="215" height="18" rx="9" fill="#173b3a"/>
+    <rect x="135" y="214" width="280" height="10" rx="5" fill="#a9bcb7"/>
+    <rect x="135" y="237" width="238" height="10" rx="5" fill="#cad6d2"/>
+    <rect x="135" y="277" width="120" height="38" rx="19" fill="#0e765e"/>
+    <rect x="274" y="277" width="102" height="38" rx="19" fill="#eef4f1"/>
+    <circle cx="508" cy="246" r="76" fill="#e4f3ec"/>
+    <path d="M508 199v94M461 246h94" stroke="#0e765e" stroke-width="25" stroke-linecap="round"/>
+    <rect x="175" y="436" width="395" height="22" rx="11" fill="#173b3a"/>
+    <rect x="242" y="458" width="260" height="15" rx="8" fill="#294b49"/>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="568" y="240" width="146" height="252" rx="25" fill="#173b3a"/>
+    <rect x="579" y="260" width="124" height="208" rx="13" fill="#fff"/>
+    <rect x="599" y="290" width="84" height="11" rx="5" fill="#173b3a"/>
+    <rect x="599" y="316" width="68" height="7" rx="4" fill="#a9bcb7"/>
+    <rect x="599" y="337" width="84" height="66" rx="12" fill="#e4f3ec"/>
+    <path d="M641 351v38M622 370h38" stroke="#0e765e" stroke-width="10" stroke-linecap="round"/>
+    <rect x="599" y="421" width="84" height="26" rx="13" fill="#0e765e"/>
+    <circle cx="641" cy="480" r="5" fill="#d4e0dc"/>
+  </g>
+</svg>
