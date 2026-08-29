@@ -107,6 +107,21 @@ const publicSiteHtml = profile => {
   return `<!doctype html><html lang="en-IN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(practice)} | ${escapeHtml(specialty)}${city ? ` in ${escapeHtml(city)}` : ''}</title><meta name="description" content="${escapeHtml(description)}"><link rel="canonical" href="${canonical}"><link rel="stylesheet" href="/public-site.css"><script type="application/ld+json">${JSON.stringify(schema)}</script></head><body><header class="public-header"><a class="public-brand" href="${canonical}">${escapeHtml(practice)}</a><nav><a href="#services">Services</a><a href="#about">About</a><a href="#contact">Contact</a></nav>${callLink}</header><main><section class="public-hero"><div><p class="public-kicker">${escapeHtml(specialty)}${city ? ` in ${escapeHtml(city)}` : ''}</p><h1>${escapeHtml(practice)}</h1><p>${escapeHtml(bio)}</p><div class="public-actions">${callLink}${waLink}</div></div><img src="/healthcare-website-design.svg" width="800" height="560" alt="Healthcare practice website" decoding="async" fetchpriority="high"></section><section class="public-section" id="services"><p class="public-kicker">Services</p><h2>How the practice can help</h2><div class="public-services">${serviceCards}</div></section><section class="public-section public-about" id="about"><div><p class="public-kicker">About the practice</p><h2>${escapeHtml(specialty)} with clear, accessible contact information</h2><p>${escapeHtml(bio)}</p></div><dl><div><dt>Location</dt><dd>${escapeHtml(address || 'Contact the practice')}</dd></div><div><dt>Hours</dt><dd>${escapeHtml(hours)}</dd></div><div><dt>Phone</dt><dd>${escapeHtml(phone || 'Contact details available on request')}</dd></div></dl></section><section class="public-contact" id="contact"><p class="public-kicker">Contact</p><h2>Request information or an appointment</h2><p>Contact the practice directly for availability, fees and service information.</p><div class="public-actions">${callLink}${waLink}</div></section></main><footer class="public-footer"><div><strong>${escapeHtml(practice)}</strong><span>${escapeHtml([phone,city].filter(Boolean).join(' · '))}</span></div><div><span>Free website powered by <a href="https://nirolife.com/">NiroLife</a></span><small>Practice information is supplied and approved by the provider. This page does not provide medical advice.</small></div></footer></body></html>`;
 };
 
+const designedPublicSiteHtml = profile => {
+  const theme = ['green','blue','purple','coral'].includes(profile.theme) ? profile.theme : 'green';
+  const template = ['modern','premium','minimal'].includes(profile.template) ? profile.template : 'modern';
+  const heroStyle = profile.heroStyle === 'illustration' ? 'illustration' : 'photo';
+  const heroImage = heroStyle === 'illustration' ? '/healthcare-website-design.svg' : '/healthcare-hero-v2.png';
+  const headline = escapeHtml(String(profile.headline || 'care you can trust.').slice(0, 100));
+  const practice = escapeHtml(String(profile.practice || 'Healthcare Practice').slice(0, 180));
+  const designCss = `<style>.theme-blue{--green:#176b8a;--coral:#249cc5}.theme-purple{--green:#60408e;--coral:#8c68c7}.theme-coral{--green:#a9493b;--coral:#ef765d}.public-hero h1 em{display:block;color:var(--green);font-weight:500}.public-hero img{max-height:560px;object-fit:cover;border-radius:14px}.visual-illustration .public-hero img{object-fit:contain;border-radius:0}.template-premium{--ink:#172d35;--green:#8b542a;--coral:#d69558}.template-premium .public-primary,.template-premium .public-secondary,.template-premium .public-services article,.template-premium .public-about dl{border-radius:3px}.template-minimal .public-services article{border-width:1px 0 0;border-radius:0;padding-left:0}</style>`;
+  return publicSiteHtml(profile)
+    .replace('</head>', `${designCss}</head>`)
+    .replace('<body>', `<body class="theme-${theme} template-${template} visual-${heroStyle}">`)
+    .replace(`<h1>${practice}</h1>`, `<h1>${practice}<em>${headline}</em></h1>`)
+    .replace('src="/healthcare-website-design.svg" width="800" height="560" alt="Healthcare practice website"', `src="${heroImage}" width="800" height="560" alt="${practice} healthcare website"`);
+};
+
 app.post('/api/practices', async (req, res) => {
   const { name, type, practice, city } = req.body || {};
   if (!name || !practice || !city) return res.status(400).json({ error: 'Name, practice and city are required.' });
@@ -131,7 +146,7 @@ app.get('/sites/:slug', async (req, res) => {
   const profile = practices.find(item => item.slug === req.params.slug && item.publicationStatus === 'live');
   if (!profile) return res.status(404).send('This website is not published or is no longer available.');
   res.set('Cache-Control', 'public, max-age=300, s-maxage=900');
-  res.send(publicSiteHtml(profile));
+  res.send(designedPublicSiteHtml(profile));
 });
 
 app.get('/sitemap-sites.xml', async (_req, res) => {
@@ -145,7 +160,7 @@ app.patch('/api/practices/:slug', async (req, res) => {
   const profile = practices.find(item => item.slug === req.params.slug);
   if (!profile) return res.status(404).json({ error: 'Website preview not found.' });
   if (!req.get('x-edit-token') || req.get('x-edit-token') !== profile.editToken) return res.status(401).json({ error: 'This edit link is not valid.' });
-  const allowed = ['practice', 'headline', 'bio', 'theme', 'template'];
+  const allowed = ['practice', 'headline', 'bio', 'theme', 'template', 'heroStyle'];
   allowed.forEach(key => { if (typeof req.body?.[key] === 'string') profile[key] = req.body[key].slice(0, key === 'bio' ? 500 : 100); });
   profile.updatedAt = new Date().toISOString();
   await writePractices(practices);
