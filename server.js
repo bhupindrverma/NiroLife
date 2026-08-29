@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs/promises');
+const crypto = require('crypto');
 const express = require('express');
 const mysql = require('mysql2/promise');
 const nodemailer = require('nodemailer');
@@ -10,8 +11,10 @@ const publicDir = __dirname;
 const dataDir = path.join(__dirname, 'data');
 const enquiryFile = path.join(dataDir, 'enquiries.json');
 const eventFile = path.join(dataDir, 'events.json');
+const practiceFile = path.join(dataDir, 'practices.json');
 let enquiryFallback = [];
 let eventFallback = [];
+let practiceFallback = [];
 
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(publicDir, { extensions: ['html'] }));
@@ -40,19 +43,39 @@ app.get('/api/health', async (_req, res) => {
   catch (error) { res.status(503).json({ ok: false, database: 'unavailable' }); }
 });
 
+async function readPractices() { try { return JSON.parse(await fs.readFile(practiceFile, 'utf8')); } catch (_error) { return practiceFallback; } }
+async function writePractices(practices) { practiceFallback = practices; await fs.mkdir(dataDir, { recursive: true }); try { await fs.writeFile(practiceFile, JSON.stringify(practices, null, 2)); } catch (_error) { /* Memory fallback remains available. */ } }
+const publicPractice = item => { const { editToken, ...profile } = item; return profile; };
+
 app.post('/api/practices', async (req, res) => {
-  const { name, type, practice, city, services = '', phone = '', hours = '', specialty = '', whatsapp = '', email = '', address = '', bio = '', color = 'green' } = req.body || {};
+  const { name, type, practice, city } = req.body || {};
   if (!name || !practice || !city) return res.status(400).json({ error: 'Name, practice and city are required.' });
-  const db = getPool();
-  if (!db) return res.status(202).json({ saved: false, mode: 'prototype', message: 'Database is not configured yet.' });
-  try {
-    const [user] = await db.query('INSERT INTO users (email) VALUES (?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)', [`preview-${Date.now()}@nirolife.local`]);
-    const userId = user.insertId;
-    const [practiceRow] = await db.query('INSERT INTO practices (user_id,name,type,city,services,phone,hours) VALUES (?,?,?,?,?,?,?)', [userId, practice, type || 'Healthcare practice', city, services, phone, hours]);
-    const slug = `${practice.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${practiceRow.insertId}`;
-    await db.query('INSERT INTO websites (practice_id,slug) VALUES (?,?)', [practiceRow.insertId, slug]);
-    res.status(201).json({ saved: true, slug });
-  } catch (error) { res.status(500).json({ error: 'Unable to save practice.' }); }
+  const base = practice.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 45) || 'practice';
+  const slug = `${base}-${crypto.randomBytes(4).toString('hex')}`;
+  const editToken = crypto.randomBytes(18).toString('hex');
+  const practices = await readPractices();
+  practices.unshift({ ...req.body, slug, editToken, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+  await writePractices(practices.slice(0, 5000));
+  res.status(201).json({ saved: true, slug, editToken });
+});
+
+app.get('/api/practices/:slug', async (req, res) => {
+  const practices = await readPractices();
+  const profile = practices.find(item => item.slug === req.params.slug);
+  if (!profile) return res.status(404).json({ error: 'Website preview not found.' });
+  res.json(publicPractice(profile));
+});
+
+app.patch('/api/practices/:slug', async (req, res) => {
+  const practices = await readPractices();
+  const profile = practices.find(item => item.slug === req.params.slug);
+  if (!profile) return res.status(404).json({ error: 'Website preview not found.' });
+  if (!req.get('x-edit-token') || req.get('x-edit-token') !== profile.editToken) return res.status(401).json({ error: 'This edit link is not valid.' });
+  const allowed = ['practice', 'headline', 'bio', 'theme', 'template'];
+  allowed.forEach(key => { if (typeof req.body?.[key] === 'string') profile[key] = req.body[key].slice(0, key === 'bio' ? 500 : 100); });
+  profile.updatedAt = new Date().toISOString();
+  await writePractices(practices);
+  res.json({ saved: true });
 });
 
 async function readEnquiries() {

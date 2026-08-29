@@ -6,6 +6,7 @@ const submitButton = form.querySelector('button[type="submit"]');
 const stepOneNames = ['name', 'type', 'practice', 'specialty', 'city'];
 const stepTwoNames = ['services', 'phone', 'whatsapp', 'email', 'address', 'hours', 'bio', 'color'];
 const stepActions = document.createElement('div');
+let generatedSlug = localStorage.getItem('nirolifeSlug') || '';
 stepActions.className = 'step-actions';
 stepActions.innerHTML = '<button class="button button-outline" type="button" id="backStep">← Back</button><button class="button button-primary" type="button" id="nextStep">Continue →</button>';
 submitButton.before(stepActions);
@@ -49,7 +50,7 @@ form.addEventListener('submit', (event) => {
   localStorage.setItem('nirolifePreview', JSON.stringify(profile));
   fetch('/api/practices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profile) })
     .then((response) => response.json())
-    .then((result) => { if (result.slug) localStorage.setItem('nirolifeSlug', result.slug); })
+    .then((result) => { if (result.slug) { generatedSlug = result.slug; localStorage.setItem('nirolifeSlug', result.slug); localStorage.setItem(`nirolifeEditToken:${result.slug}`, result.editToken || ''); } })
     .catch(() => { /* Local preview mode: browser storage remains the fallback. */ });
   modalTitle.textContent = `${practice} website preview`;
   modal.classList.add('open');
@@ -60,6 +61,6 @@ form.addEventListener('submit', (event) => {
 document.getElementById('modalClose').addEventListener('click', closeModal);
 document.getElementById('continueButton').addEventListener('click', () => {
   closeModal();
-  window.location.href = 'preview.html';
+  window.location.href = generatedSlug ? `preview.html?site=${encodeURIComponent(generatedSlug)}` : 'preview.html';
 });
 modal.addEventListener('click', (event) => { if (event.target === modal) closeModal(); });

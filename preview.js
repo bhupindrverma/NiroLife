@@ -1,5 +1,7 @@
-const saved = JSON.parse(localStorage.getItem('nirolifePreview') || '{}');
-const uiSaved = JSON.parse(localStorage.getItem('nirolifePreviewDesign') || '{}');
+let saved = JSON.parse(localStorage.getItem('nirolifePreview') || '{}');
+let uiSaved = JSON.parse(localStorage.getItem('nirolifePreviewDesign') || '{}');
+let siteSlug = new URLSearchParams(location.search).get('site') || localStorage.getItem('nirolifeSlug') || '';
+let editToken = siteSlug ? localStorage.getItem(`nirolifeEditToken:${siteSlug}`) || '' : '';
 const state = {
   practice: uiSaved.practice || saved.practice || 'Your Practice', name: saved.name || 'Your care team', type: saved.type || 'Healthcare practice',
   city: saved.city || 'Your city', specialty: saved.specialty || saved.type || 'Healthcare practice', phone: saved.phone || '',
@@ -7,8 +9,7 @@ const state = {
   bio: uiSaved.bio || saved.bio || `${saved.name || 'Our team'} welcomes you to a more personal, informed care experience.`,
   headline: uiSaved.headline || 'care you can trust.', theme: uiSaved.theme || saved.color || 'green', template: uiSaved.template || 'modern', photo: uiSaved.photo || 'healthcare-hero-v2.png'
 };
-const rawServices = String(saved.services || 'Consultation, Treatment planning, Follow-up care');
-const services = rawServices.split(/,|\n|;/).map(item => item.replace(/^[-•\d.\s]+/,'').trim()).filter(item => item.length > 2).slice(0, 6);
+let services = String(saved.services || 'Consultation, Treatment planning, Follow-up care').split(/,|\n|;/).map(item => item.replace(/^[-•\d.\s]+/,'').trim()).filter(item => item.length > 2).slice(0, 6);
 const safe = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const el = id => document.getElementById(id);
 
@@ -42,12 +43,42 @@ function render() {
 }
 render();
 
+async function loadSharedWebsite() {
+  if (!siteSlug) return;
+  try {
+    const response = await fetch(`/api/practices/${encodeURIComponent(siteSlug)}`);
+    if (!response.ok) throw new Error();
+    const remote = await response.json();
+    saved = remote;
+    Object.assign(state, { practice: remote.practice || state.practice, name: remote.name || state.name, type: remote.type || state.type, city: remote.city || state.city, specialty: remote.specialty || remote.type || state.specialty, phone: remote.phone || '', whatsapp: (remote.whatsapp || remote.phone || '').replace(/\D/g,''), hours: remote.hours || state.hours, address: remote.address || remote.city || state.address, bio: remote.bio || state.bio, headline: remote.headline || state.headline, theme: remote.theme || remote.color || state.theme, template: remote.template || state.template });
+    services = String(remote.services || 'Consultation, Treatment planning, Follow-up care').split(/,|\n|;/).map(item=>item.replace(/^[-•\d.\s]+/,'').trim()).filter(item=>item.length>2).slice(0,6);
+    el('editPractice').value=state.practice;el('editHeadline').value=state.headline;el('editBio').value=state.bio;el('themePicker').value=state.theme;el('templatePicker').value=state.template;
+    el('previewStatus').textContent = editToken ? 'Owner preview · Saved and shareable' : 'Shared website preview';
+    if (!editToken) { el('toolbarToggle').hidden = true; document.querySelector('.preview-note').textContent = 'Shared website preview'; }
+    render();
+  } catch (_error) { el('previewStatus').textContent = 'Preview link unavailable on this device'; }
+}
+async function ensureShareLink() {
+  if (siteSlug || !saved.name || !saved.practice || !saved.city) return;
+  try {
+    const response = await fetch('/api/practices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(saved)});
+    const result = await response.json();
+    if (!response.ok || !result.slug) throw new Error();
+    siteSlug=result.slug;editToken=result.editToken||'';localStorage.setItem('nirolifeSlug',siteSlug);localStorage.setItem(`nirolifeEditToken:${siteSlug}`,editToken);history.replaceState({},'',`preview.html?site=${encodeURIComponent(siteSlug)}`);el('previewStatus').textContent='Owner preview · Saved and shareable';
+  } catch (_error) { el('previewStatus').textContent='Private preview · Saved on this device'; }
+}
+if(siteSlug)loadSharedWebsite();else ensureShareLink();
+
 const toolbar = el('builderToolbar');
 el('toolbarToggle').addEventListener('click',()=>toolbar.classList.add('open')); el('closeToolbar').addEventListener('click',()=>toolbar.classList.remove('open'));
 el('editPractice').value=state.practice; el('editHeadline').value=state.headline; el('editBio').value=state.bio; el('themePicker').value=state.theme; el('templatePicker').value=state.template;
 ['themePicker','templatePicker'].forEach(id=>el(id).addEventListener('change',event=>{state[id==='themePicker'?'theme':'template']=event.target.value;render();}));
 el('photoPicker').addEventListener('change',event=>{const file=event.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{state.photo=reader.result;render();};reader.readAsDataURL(file);});
-el('savePreview').addEventListener('click',()=>{state.practice=el('editPractice').value.trim()||state.practice;state.headline=el('editHeadline').value.trim()||state.headline;state.bio=el('editBio').value.trim()||state.bio;const design={practice:state.practice,headline:state.headline,bio:state.bio,theme:state.theme,template:state.template};if(state.photo.startsWith('data:')&&state.photo.length<1500000)design.photo=state.photo;localStorage.setItem('nirolifePreviewDesign',JSON.stringify(design));render();toolbar.classList.remove('open');});
+el('savePreview').addEventListener('click',async()=>{state.practice=el('editPractice').value.trim()||state.practice;state.headline=el('editHeadline').value.trim()||state.headline;state.bio=el('editBio').value.trim()||state.bio;const design={practice:state.practice,headline:state.headline,bio:state.bio,theme:state.theme,template:state.template};if(state.photo.startsWith('data:')&&state.photo.length<1500000)design.photo=state.photo;localStorage.setItem('nirolifePreviewDesign',JSON.stringify(design));render();if(siteSlug&&editToken){el('savePreview').textContent='Saving…';try{const response=await fetch(`/api/practices/${encodeURIComponent(siteSlug)}`,{method:'PATCH',headers:{'Content-Type':'application/json','x-edit-token':editToken},body:JSON.stringify(design)});if(!response.ok)throw new Error();el('savePreview').textContent='Saved and shareable ✓';}catch(_error){el('savePreview').textContent='Saved on this device';}}toolbar.classList.remove('open');});
+
+el('copyLink').addEventListener('click',async()=>{const link=siteSlug?`${location.origin}/preview.html?site=${encodeURIComponent(siteSlug)}`:location.href;try{await navigator.clipboard.writeText(link);el('copyLink').textContent='Link copied ✓';}catch(_error){el('copyLink').textContent='Copy unavailable';}});
+el('desktopPreview').addEventListener('click',()=>{el('sitePreview').classList.remove('device-mobile');el('desktopPreview').classList.add('active');el('mobilePreview').classList.remove('active');});
+el('mobilePreview').addEventListener('click',()=>{el('sitePreview').classList.add('device-mobile');el('mobilePreview').classList.add('active');el('desktopPreview').classList.remove('active');el('sitePreview').scrollIntoView({behavior:'smooth'});});
 el('viewServices').addEventListener('click',()=>{const section=el('services');section.classList.toggle('expanded');el('viewServices').textContent=section.classList.contains('expanded')?'Show fewer services':'View all services';});
 
 el('appointmentForm').addEventListener('submit',event=>{event.preventDefault();const data=Object.fromEntries(new FormData(event.currentTarget).entries());const message=`Hello ${state.practice}, my name is ${data.patientName}. I would like to request an appointment on ${data.preferredDay}. My phone number is ${data.patientPhone}.`;if(state.whatsapp.length>=10)window.open(`https://wa.me/${state.whatsapp}?text=${encodeURIComponent(message)}`,'_blank','noopener');else window.location.href=state.phone?`tel:${state.phone.replace(/\s/g,'')}`:'#location';});
