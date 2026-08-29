@@ -1,7 +1,9 @@
 let saved = JSON.parse(localStorage.getItem('nirolifePreview') || '{}');
 let uiSaved = JSON.parse(localStorage.getItem('nirolifePreviewDesign') || '{}');
-let siteSlug = new URLSearchParams(location.search).get('site') || localStorage.getItem('nirolifeSlug') || '';
+const requestedSite = new URLSearchParams(location.search).get('site') || '';
+let siteSlug = requestedSite || localStorage.getItem('nirolifeSlug') || '';
 let editToken = siteSlug ? localStorage.getItem(`nirolifeEditToken:${siteSlug}`) || '' : '';
+if (requestedSite && !editToken) { saved = {}; uiSaved = {}; }
 const state = {
   practice: uiSaved.practice || saved.practice || 'Your Practice', name: saved.name || 'Your care team', type: saved.type || 'Healthcare practice',
   city: saved.city || 'Your city', specialty: saved.specialty || saved.type || 'Healthcare practice', phone: saved.phone || '',
@@ -56,7 +58,7 @@ async function loadSharedWebsite() {
     el('previewStatus').textContent = editToken ? 'Owner preview · Saved and shareable' : 'Shared website preview';
     if (!editToken) { el('toolbarToggle').hidden = true; document.querySelector('.preview-note').textContent = 'Shared website preview'; }
     render();
-  } catch (_error) { el('previewStatus').textContent = 'Preview link unavailable on this device'; }
+  } catch (_error) { el('previewStatus').textContent = 'This preview link is unavailable'; el('toolbarToggle').hidden = true; }
 }
 async function ensureShareLink() {
   if (siteSlug || !saved.name || !saved.practice || !saved.city) return;
