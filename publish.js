@@ -52,6 +52,7 @@ form.addEventListener('submit', async event => {
     const response = await fetch('/api/enquiries', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Unable to submit your request.');
     steps[2].classList.remove('active'); document.querySelector('.steps').hidden = true; document.getElementById('successPanel').hidden = false;
+    document.getElementById('statusLink').href = result.statusUrl || 'status.html';
     document.getElementById('successMessage').textContent = data.get('package') === 'Free Preview' ? 'Your preview remains available. We have saved your interest and will contact you only about this request.' : 'Your details are ready for review. We will contact you before any payment or publishing work begins.';
   } catch (error) { status.textContent = `${error.message} You can also email help@nirolife.com.`; button.disabled = false; button.textContent = 'Submit publishing request'; }
 });
