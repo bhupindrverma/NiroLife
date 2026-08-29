@@ -3,3 +3,4 @@
 .form-two{display:grid;grid-template-columns:1fr 1fr;gap:13px}
 .pricing-note{text-align:center;color:var(--muted);font-size:11px;margin:25px 0 0}
 @media(max-width:600px){.form-two{grid-template-columns:1fr}}
+.step-actions{display:flex;justify-content:space-between;gap:12px;margin-top:22px}.step-actions .button{margin-top:0}.generator-form [hidden]{display:none!important}

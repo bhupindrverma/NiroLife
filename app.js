@@ -2,6 +2,36 @@ const form = document.getElementById('generatorForm');
 const modal = document.getElementById('previewModal');
 const modalTitle = document.getElementById('previewTitle');
 const closeModal = () => { modal.classList.remove('open'); modal.setAttribute('aria-hidden', 'true'); };
+const submitButton = form.querySelector('button[type="submit"]');
+const stepOneNames = ['name', 'type', 'practice', 'specialty', 'city'];
+const stepTwoNames = ['services', 'phone', 'whatsapp', 'email', 'address', 'hours', 'bio', 'color'];
+const stepActions = document.createElement('div');
+stepActions.className = 'step-actions';
+stepActions.innerHTML = '<button class="button button-outline" type="button" id="backStep">← Back</button><button class="button button-primary" type="button" id="nextStep">Continue →</button>';
+submitButton.before(stepActions);
+let currentStep = 1;
+
+function showStep(step) {
+  currentStep = step;
+  [...stepOneNames, ...stepTwoNames].forEach(name => {
+    const control = form.elements[name];
+    if (control) control.closest('label').hidden = step === 1 ? !stepOneNames.includes(name) : !stepTwoNames.includes(name);
+  });
+  document.getElementById('backStep').hidden = step === 1;
+  document.getElementById('nextStep').hidden = step === 2;
+  submitButton.hidden = step === 1;
+  form.querySelector('.form-kicker').textContent = `STEP ${step} OF 2 · FREE WEBSITE PREVIEW`;
+  form.querySelector('h3').textContent = step === 1 ? 'Start with your practice' : 'Add patient-friendly details';
+}
+
+document.getElementById('nextStep').addEventListener('click', () => {
+  const invalid = stepOneNames.map(name => form.elements[name]).find(control => control && !control.checkValidity());
+  if (invalid) return invalid.reportValidity();
+  showStep(2);
+  form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+document.getElementById('backStep').addEventListener('click', () => showStep(1));
+showStep(1);
 const requestedType = new URLSearchParams(window.location.search).get('type');
 if (requestedType) {
   const typeSelect = form.elements.type;
@@ -11,6 +41,7 @@ if (requestedType) {
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
+  if (currentStep !== 2) return showStep(2);
   const data = new FormData(form);
   const practice = data.get('practice') || 'Your practice';
   const profile = Object.fromEntries(data.entries());

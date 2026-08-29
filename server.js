@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs/promises');
 const express = require('express');
 const mysql = require('mysql2/promise');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -76,6 +77,16 @@ async function writeEvents(events) {
   catch (_error) { /* Analytics remain best-effort if storage is unavailable. */ }
 }
 
+async function sendEnquiryEmails(enquiry) {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD) return false;
+  const transporter = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } });
+  const adminEmail = process.env.LEAD_EMAIL || process.env.SMTP_USER;
+  const text = `New NiroLife publishing enquiry\n\nPractice: ${enquiry.practice}\nContact: ${enquiry.contactName}\nEmail: ${enquiry.email}\nPhone: ${enquiry.phone}\nPackage: ${enquiry.package}\nCity: ${enquiry.city || ''}\nMessage: ${enquiry.message || ''}`;
+  await transporter.sendMail({ from: `NiroLife <${process.env.SMTP_USER}>`, to: adminEmail, replyTo: enquiry.email, subject: `New NiroLife enquiry: ${enquiry.practice}`, text });
+  await transporter.sendMail({ from: `NiroLife <${process.env.SMTP_USER}>`, to: enquiry.email, subject: `We received your NiroLife website enquiry`, text: `Hello ${enquiry.contactName},\n\nThank you for requesting help publishing the ${enquiry.practice} website preview. We received your interest in ${enquiry.package}. We will review the information and reply shortly.\n\nThis message confirms an enquiry only; no payment or contract has been created.\n\nNiroLife` });
+  return true;
+}
+
 app.post('/api/events', async (req, res) => {
   const { name, page = '/', source = '', profession = '' } = req.body || {};
   const allowed = ['page_view','generator_start','preview_created','claim_opened','enquiry_sent'];
@@ -95,7 +106,8 @@ app.post('/api/enquiries', async (req, res) => {
     try { await db.query('INSERT INTO enquiries (contact_name,email,phone,package_name,practice_name,practice_type,specialty,city,message,preview_json,status) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [contactName, email, phone, enquiry.package, practice, type || '', specialty || '', city || '', message, JSON.stringify(preview), 'new']); }
     catch (_error) { const enquiries = await readEnquiries(); enquiries.unshift(enquiry); await writeEnquiries(enquiries); }
   } else { const enquiries = await readEnquiries(); enquiries.unshift(enquiry); await writeEnquiries(enquiries); }
-  res.status(201).json({ saved: true, id: enquiry.id });
+  sendEnquiryEmails(enquiry).catch(error => console.error('Enquiry email failed:', error.message));
+  res.status(201).json({ saved: true, id: enquiry.id, emailQueued: Boolean(process.env.SMTP_HOST && process.env.SMTP_PASSWORD) });
 });
 
 app.get('/api/admin/enquiries', async (req, res) => {
@@ -117,6 +129,27 @@ app.get('/api/admin/analytics', async (req, res) => {
   const totals = events.reduce((summary, event) => { summary[event.name] = (summary[event.name] || 0) + 1; return summary; }, {});
   const pages = events.filter(event => event.name === 'page_view').reduce((summary, event) => { summary[event.page] = (summary[event.page] || 0) + 1; return summary; }, {});
   res.json({ totals, pages, recent: events.slice(0, 50) });
+});
+
+app.patch('/api/admin/enquiries/:id', async (req, res) => {
+  const adminKey = process.env.ADMIN_KEY;
+  if (!adminKey || req.get('x-admin-key') !== adminKey) return res.status(401).json({ error: 'Invalid admin password.' });
+  const allowed = ['new', 'contacted', 'qualified', 'won', 'closed'];
+  const status = req.body?.status;
+  if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid lead status.' });
+  const db = getPool();
+  if (db && /^\d+$/.test(req.params.id)) {
+    try {
+      await db.query('UPDATE enquiries SET status = ? WHERE id = ?', [status, req.params.id]);
+      return res.json({ updated: true });
+    } catch (_error) { /* Fall back to file storage. */ }
+  }
+  const enquiries = await readEnquiries();
+  const enquiry = enquiries.find(item => String(item.id) === String(req.params.id));
+  if (!enquiry) return res.status(404).json({ error: 'Enquiry not found.' });
+  enquiry.status = status;
+  await writeEnquiries(enquiries);
+  res.json({ updated: true });
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
