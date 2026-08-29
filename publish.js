@@ -36,6 +36,7 @@ function validateDetails() {
 }
 function renderReview() {
   const data = new FormData(form); const addOns = data.getAll('addOns');
+  document.getElementById('requestNotice').textContent = data.get('package') === 'Free Live Website' ? 'We verify your healthcare business information and public contact details. The website is published on a NiroLife address only after this review and your content approval.' : 'We review your request and contact you to confirm scope, timing and payment. Your website is not published automatically.';
   document.getElementById('reviewSummary').innerHTML = `<div><small>Selected plan</small><strong>${clean(data.get('package'))}</strong><span>${addOns.length ? clean(addOns.join(' + ')) : 'No optional add-ons'}</span></div><div><small>Practice</small><strong>${clean(practice.practice || 'Your practice')}</strong><span>${clean(data.get('ownerName'))}${data.get('qualifications') ? ` · ${clean(data.get('qualifications'))}` : ''}</span></div><div><small>Contact</small><strong>${clean(data.get('contactName'))}</strong><span>${clean(data.get('email'))} · ${clean(data.get('phone'))}</span></div><div><small>Launch information</small><strong>${clean(data.get('domain') || 'Domain to be decided')}</strong><span>${clean(data.get('address'))}</span></div>`;
 }
 document.querySelectorAll('[data-next]').forEach(button => button.addEventListener('click', () => { if (currentStep === 2 && !validateDetails()) return; if (currentStep === 2) renderReview(); showStep(currentStep + 1); }));
@@ -53,6 +54,6 @@ form.addEventListener('submit', async event => {
     if (!response.ok) throw new Error(result.error || 'Unable to submit your request.');
     steps[2].classList.remove('active'); document.querySelector('.steps').hidden = true; document.getElementById('successPanel').hidden = false;
     document.getElementById('statusLink').href = result.statusUrl || 'status.html';
-    document.getElementById('successMessage').textContent = data.get('package') === 'Free Preview' ? 'Your preview remains available. We have saved your interest and will contact you only about this request.' : 'Your details are ready for review. We will contact you before any payment or publishing work begins.';
+    document.getElementById('successMessage').textContent = data.get('package') === 'Free Live Website' ? 'Your free website request is waiting for manual verification. No payment is required. Track the request below and we will email you when the website is live.' : data.get('package') === 'Free Preview' ? 'Your preview remains available. We have saved your interest and will contact you only about this request.' : 'Your details are ready for review. We will contact you before any payment or publishing work begins.';
   } catch (error) { status.textContent = `${error.message} You can also email help@nirolife.com.`; button.disabled = false; button.textContent = 'Submit publishing request'; }
 });

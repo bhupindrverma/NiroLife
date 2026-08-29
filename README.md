@@ -2,6 +2,8 @@
 
 NiroLife is the healthcare website-generator product by SeRankPro. The current MVP is a static, hosting-ready prototype: `index.html` contains the marketing site and generator, while `preview.html` renders the generated practice website.
 
+Verified healthcare professionals can also request a Free Live Website. The request enters the `verification_review` workflow, an administrator confirms business authority, contact details and public content, and the application publishes an indexable server-rendered page at `/sites/:slug`. Unverified previews remain `noindex` and cannot use the public route.
+
 ## Current flow
 
 1. A visitor completes the generator form.

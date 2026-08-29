@@ -7,10 +7,13 @@ const approvalStyle = document.createElement('link'); approvalStyle.rel='stylesh
 document.querySelector('.help').insertAdjacentHTML('beforebegin', `<section class="approval-card" id="approvalCard" hidden><div><span class="eyebrow">Final website review</span><h2>Your website is ready for approval.</h2><p>Check names, qualifications, services, contact details, links and spelling before approving.</p><a id="finalPreviewLink" target="_blank" rel="noopener">Open final website preview ↗</a></div><div class="approval-actions"><label>Revisions needed <small>Describe all requested changes together</small><textarea id="revisionFeedback" rows="4" maxlength="2000" placeholder="Please change…"></textarea></label><div><button type="button" id="requestChanges">Request revisions</button><button type="button" id="approveWebsite">Approve for launch</button></div><p id="approvalStatus" aria-live="polite"></p></div></section><section class="reported-card" id="revisionCard" hidden><b>Revisions requested</b><span id="revisionText"></span></section><section class="live-card" id="liveCard" hidden><span class="eyebrow">Website launched</span><h2>Your website is live.</h2><a id="liveLink" target="_blank" rel="noopener">Open live website ↗</a></section>`);
 const clean = value => String(value || '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 
-function renderTimeline(stage) {
-  let index = stages.indexOf(stage); if (stage === 'revision_requested') index = 2; if (stage === 'manual_review' || stage === 'awaiting_customer') index = -1; if (stage === 'closed') index = 0;
-  el('timeline').innerHTML = labels.map((label, i) => `<div class="timeline-item ${i < index ? 'complete' : i === index ? 'active' : ''}"><i>${i < index ? '✓' : i + 1}</i><span>${clean(label)}</span></div>`).join('');
-  el('progressCount').textContent = index < 0 ? 'Reviewing request' : `${Math.min(index + 1, stages.length)} of ${stages.length}`;
+function renderTimeline(stage, packageName = '') {
+  const isFreeLive = packageName === 'Free Live Website';
+  const flow = isFreeLive ? ['verification_review','live'] : stages;
+  const flowLabels = isFreeLive ? ['Business verification','Website live'] : labels;
+  let index = flow.indexOf(stage); if (!isFreeLive && stage === 'revision_requested') index = 2; if (stage === 'manual_review' || stage === 'awaiting_customer') index = -1; if (stage === 'closed') index = 0;
+  el('timeline').innerHTML = flowLabels.map((label, i) => `<div class="timeline-item ${i < index ? 'complete' : i === index ? 'active' : ''}"><i>${i < index ? '✓' : i + 1}</i><span>${clean(label)}</span></div>`).join('');
+  el('progressCount').textContent = index < 0 ? 'Reviewing request' : `${Math.min(index + 1, flow.length)} of ${flow.length}`;
 }
 async function loadStatus() {
   if (!token) return showError('The private token is missing from this link.');
@@ -18,7 +21,7 @@ async function loadStatus() {
     const response = await fetch(`/api/customer/${encodeURIComponent(token)}`); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Unable to load this request.'); customer = data;
     el('loading').hidden = true; el('portal').hidden = false; el('practiceName').textContent = data.practice; el('contactName').textContent = data.contactName; el('stageLabel').textContent = data.label; el('packageName').textContent = data.package; el('createdDate').textContent = new Date(data.createdAt).toLocaleDateString(); el('nextAction').textContent = data.nextAction;
     if (data.previewUrl) { el('previewLink').href = data.previewUrl; } else { el('previewLink').hidden = true; }
-    renderTimeline(data.stage);
+    renderTimeline(data.stage, data.package);
     if (data.paymentReportedAt) { el('reportedCard').hidden = false; }
     else if (data.stage === 'payment_review' && data.quoteAmount) { el('paymentCard').hidden = false; el('quoteAmount').textContent = data.quoteAmount; el('paymentInstructions').textContent = data.paymentInstructions || 'NiroLife will send payment instructions separately.'; }
     if (data.stage === 'content_approval' && data.finalPreviewUrl) { el('approvalCard').hidden=false; el('finalPreviewLink').href=data.finalPreviewUrl; }

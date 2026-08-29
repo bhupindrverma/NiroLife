@@ -3,3 +3,4 @@ Allow: /
 Disallow: /admin.html
 Disallow: /preview.html
 Sitemap: https://nirolife.com/sitemap.xml
+Sitemap: https://nirolife.com/sitemap-sites.xml

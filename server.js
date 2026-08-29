@@ -22,6 +22,7 @@ let automationFallback = {};
 
 const WORKFLOW_STAGES = {
   manual_review: { label: 'Review enquiry', nextAction: 'Review the preview, package and contact details, then contact the customer.', owner: 'admin', manual: true, legacy: 'new' },
+  verification_review: { label: 'Verify free website', nextAction: 'Confirm the healthcare business, public contact details and website content, then publish the free NiroLife website.', owner: 'admin', manual: true, legacy: 'qualified' },
   awaiting_customer: { label: 'Awaiting customer reply', nextAction: 'Automation waits for the customer to reply or choose the next step.', owner: 'customer', manual: false, legacy: 'contacted' },
   payment_review: { label: 'Verify payment', nextAction: 'Confirm the payment or payment arrangement, then request onboarding details.', owner: 'admin', manual: true, legacy: 'qualified' },
   onboarding: { label: 'Customer onboarding', nextAction: 'Customer must provide domain, logo, photos and verified practice details.', owner: 'customer', manual: false, legacy: 'qualified' },
@@ -34,6 +35,7 @@ const WORKFLOW_STAGES = {
 };
 const CUSTOMER_STAGE_INFO = {
   manual_review: { label: 'Request review', nextAction: 'Our team is reviewing your website request.' },
+  verification_review: { label: 'Business verification', nextAction: 'NiroLife is checking your public practice information before the free website can go live.' },
   awaiting_customer: { label: 'Awaiting your response', nextAction: 'Please reply to the latest NiroLife email if more information was requested.' },
   payment_review: { label: 'Quotation and payment', nextAction: 'Review the quotation below. If you pay manually, report it here so our team can verify it.' },
   onboarding: { label: 'Onboarding', nextAction: 'We are checking your website information and supplied assets.' },
@@ -46,6 +48,14 @@ const CUSTOMER_STAGE_INFO = {
 };
 
 app.use(express.json({ limit: '100kb' }));
+app.use((req, res, next) => {
+  const blocked = ['/data','/server.js','/schema.sql','/package.json','/readme.md','/deployment.md','/pnpm-lock.yaml'];
+  if (blocked.some(item => req.path.toLowerCase() === item || req.path.toLowerCase().startsWith(`${item}/`))) return res.status(404).send('Not found.');
+  res.set('X-Content-Type-Options','nosniff');
+  res.set('Referrer-Policy','strict-origin-when-cross-origin');
+  res.set('X-Frame-Options','SAMEORIGIN');
+  next();
+});
 app.use(express.static(publicDir, { extensions: ['html'] }));
 
 let pool;
@@ -75,6 +85,27 @@ app.get('/api/health', async (_req, res) => {
 async function readPractices() { try { return JSON.parse(await fs.readFile(practiceFile, 'utf8')); } catch (_error) { return practiceFallback; } }
 async function writePractices(practices) { practiceFallback = practices; await fs.mkdir(dataDir, { recursive: true }); try { await fs.writeFile(practiceFile, JSON.stringify(practices, null, 2)); } catch (_error) { /* Memory fallback remains available. */ } }
 const publicPractice = item => { const { editToken, ...profile } = item; return profile; };
+const escapeHtml = value => String(value || '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+const publicSiteHtml = profile => {
+  const practice = String(profile.practice || 'Healthcare Practice').slice(0, 180);
+  const specialty = String(profile.specialty || profile.type || 'Healthcare practice').slice(0, 120);
+  const city = String(profile.city || '').slice(0, 120);
+  const address = String(profile.address || city).slice(0, 500);
+  const hours = String(profile.hours || 'Contact the practice for timings').slice(0, 200);
+  const phone = String(profile.phone || '').replace(/[^0-9+ ()-]/g, '').slice(0, 40);
+  const whatsapp = String(profile.whatsapp || profile.phone || '').replace(/\D/g, '').slice(0, 16);
+  const bio = String(profile.bio || `${practice} provides ${specialty.toLowerCase()} services in ${city}. Contact the practice for current information and appointment availability.`).slice(0, 700);
+  const services = String(profile.services || 'Consultation, Treatment planning, Follow-up care').split(/,|\n|;/).map(item => item.replace(/^[-•\d.\s]+/,'').trim()).filter(item => item.length > 2).slice(0, 8);
+  const slug = String(profile.slug || '').replace(/[^a-z0-9-]/g, '');
+  const canonical = `https://nirolife.com/sites/${slug}`;
+  const description = `${practice} — ${specialty}${city ? ` in ${city}` : ''}. View services, timings, location and contact information.`.slice(0, 160);
+  const callLink = phone ? `<a class="public-primary" href="tel:${phone.replace(/\s/g,'')}">Call the practice</a>` : '';
+  const waLink = whatsapp.length >= 10 ? `<a class="public-secondary" href="https://wa.me/${whatsapp}?text=${encodeURIComponent(`Hello ${practice}, I would like to request an appointment.`)}" rel="noopener">WhatsApp</a>` : '';
+  const serviceCards = services.map((service, index) => `<article><span>0${index + 1}</span><h3>${escapeHtml(service)}</h3><p>Contact the practice for current service information and appointment availability.</p></article>`).join('');
+  const schemaText = value => String(value || '').replace(/[<>]/g, '');
+  const schema = { '@context':'https://schema.org', '@type':'MedicalBusiness', name:schemaText(practice), url:canonical, telephone:phone || undefined, description:schemaText(bio), address:address ? { '@type':'PostalAddress', streetAddress:schemaText(address), addressLocality:schemaText(city), addressCountry:'IN' } : undefined };
+  return `<!doctype html><html lang="en-IN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(practice)} | ${escapeHtml(specialty)}${city ? ` in ${escapeHtml(city)}` : ''}</title><meta name="description" content="${escapeHtml(description)}"><link rel="canonical" href="${canonical}"><link rel="stylesheet" href="/public-site.css"><script type="application/ld+json">${JSON.stringify(schema)}</script></head><body><header class="public-header"><a class="public-brand" href="${canonical}">${escapeHtml(practice)}</a><nav><a href="#services">Services</a><a href="#about">About</a><a href="#contact">Contact</a></nav>${callLink}</header><main><section class="public-hero"><div><p class="public-kicker">${escapeHtml(specialty)}${city ? ` in ${escapeHtml(city)}` : ''}</p><h1>${escapeHtml(practice)}</h1><p>${escapeHtml(bio)}</p><div class="public-actions">${callLink}${waLink}</div></div><img src="/healthcare-website-design.svg" width="800" height="560" alt="Healthcare practice website" decoding="async" fetchpriority="high"></section><section class="public-section" id="services"><p class="public-kicker">Services</p><h2>How the practice can help</h2><div class="public-services">${serviceCards}</div></section><section class="public-section public-about" id="about"><div><p class="public-kicker">About the practice</p><h2>${escapeHtml(specialty)} with clear, accessible contact information</h2><p>${escapeHtml(bio)}</p></div><dl><div><dt>Location</dt><dd>${escapeHtml(address || 'Contact the practice')}</dd></div><div><dt>Hours</dt><dd>${escapeHtml(hours)}</dd></div><div><dt>Phone</dt><dd>${escapeHtml(phone || 'Contact details available on request')}</dd></div></dl></section><section class="public-contact" id="contact"><p class="public-kicker">Contact</p><h2>Request information or an appointment</h2><p>Contact the practice directly for availability, fees and service information.</p><div class="public-actions">${callLink}${waLink}</div></section></main><footer class="public-footer"><div><strong>${escapeHtml(practice)}</strong><span>${escapeHtml([phone,city].filter(Boolean).join(' · '))}</span></div><div><span>Free website powered by <a href="https://nirolife.com/">NiroLife</a></span><small>Practice information is supplied and approved by the provider. This page does not provide medical advice.</small></div></footer></body></html>`;
+};
 
 app.post('/api/practices', async (req, res) => {
   const { name, type, practice, city } = req.body || {};
@@ -93,6 +124,20 @@ app.get('/api/practices/:slug', async (req, res) => {
   const profile = practices.find(item => item.slug === req.params.slug);
   if (!profile) return res.status(404).json({ error: 'Website preview not found.' });
   res.json(publicPractice(profile));
+});
+
+app.get('/sites/:slug', async (req, res) => {
+  const practices = await readPractices();
+  const profile = practices.find(item => item.slug === req.params.slug && item.publicationStatus === 'live');
+  if (!profile) return res.status(404).send('This website is not published or is no longer available.');
+  res.set('Cache-Control', 'public, max-age=300, s-maxage=900');
+  res.send(publicSiteHtml(profile));
+});
+
+app.get('/sitemap-sites.xml', async (_req, res) => {
+  const practices = await readPractices();
+  const urls = practices.filter(item => item.publicationStatus === 'live' && item.slug).map(item => `<url><loc>https://nirolife.com/sites/${escapeHtml(String(item.slug).replace(/[^a-z0-9-]/g,''))}</loc>${item.updatedAt ? `<lastmod>${escapeHtml(String(item.updatedAt).slice(0,10))}</lastmod>` : ''}<changefreq>monthly</changefreq></url>`).join('');
+  res.type('application/xml').set('Cache-Control','public, max-age=300, s-maxage=900').send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`);
 });
 
 app.patch('/api/practices/:slug', async (req, res) => {
@@ -179,7 +224,8 @@ app.post('/api/enquiries', async (req, res) => {
   const safeOnboarding = ['domain','ownerName','qualifications','address','hours','businessWhatsapp','services','assetsUrl'].reduce((result, key) => { if (typeof onboarding[key] === 'string') result[key] = onboarding[key].slice(0, key === 'services' ? 1500 : 500); return result; }, {});
   if (safeOnboarding.assetsUrl && !/^https:\/\//i.test(safeOnboarding.assetsUrl)) safeOnboarding.assetsUrl = '';
   safeOnboarding.verified = onboarding.verified === true;
-  const selected = selectedPackage || 'Not sure yet';
+  const allowedPackages = ['Free Preview','Free Live Website','Website Launch','Managed Website'];
+  const selected = allowedPackages.includes(selectedPackage) ? selectedPackage : 'Not sure yet';
   if (selected !== 'Free Preview' && !safeOnboarding.verified) return res.status(400).json({ error: 'Please confirm that the submitted business information is authorised and accurate.' });
   const enquiry = { id: Date.now().toString(36), contactName: String(contactName).slice(0,120), email: String(email).slice(0,180), phone: String(phone).slice(0,60), package: String(selected).slice(0,80), practice: String(practice).slice(0,180), type, specialty, city, message: [String(message).slice(0,1500), addOns ? `Add-ons: ${String(addOns).slice(0,500)}` : ''].filter(Boolean).join('\n'), preview: { ...preview, onboarding: safeOnboarding }, status: 'new', createdAt: new Date().toISOString() };
   const db = getPool();
@@ -188,9 +234,9 @@ app.post('/api/enquiries', async (req, res) => {
     catch (_error) { const enquiries = await readEnquiries(); enquiries.unshift(enquiry); await writeEnquiries(enquiries); }
   } else { const enquiries = await readEnquiries(); enquiries.unshift(enquiry); await writeEnquiries(enquiries); }
   const workflows = await readWorkflows();
-  const initialStage = selected === 'Free Preview' ? 'awaiting_customer' : 'payment_review';
+  const initialStage = selected === 'Free Live Website' ? 'verification_review' : selected === 'Free Preview' ? 'awaiting_customer' : 'payment_review';
   const customerToken = crypto.randomBytes(24).toString('hex');
-  workflows[String(enquiry.id)] = { stage: initialStage, notes: selected === 'Free Preview' ? 'Free preview request saved. No payment required.' : 'Onboarding details received. Confirm scope and payment before starting work.', followUpAt: '', quoteAmount: '', paymentInstructions: '', customerToken, updatedAt: new Date().toISOString() };
+  workflows[String(enquiry.id)] = { stage: initialStage, notes: selected === 'Free Live Website' ? 'Free live website requested. Verify the business, content and contact details before publishing.' : selected === 'Free Preview' ? 'Free preview request saved. No payment required.' : 'Onboarding details received. Confirm scope and payment before starting work.', followUpAt: '', quoteAmount: '', paymentInstructions: '', customerToken, updatedAt: new Date().toISOString() };
   await writeWorkflows(workflows);
   enquiry.statusUrl = `https://nirolife.com/status.html?token=${customerToken}`;
   sendEnquiryEmails(enquiry).catch(error => console.error('Enquiry email failed:', error.message));
@@ -286,6 +332,55 @@ app.get('/api/admin/analytics', async (req, res) => {
   const totals = events.reduce((summary, event) => { summary[event.name] = (summary[event.name] || 0) + 1; return summary; }, {});
   const pages = events.filter(event => event.name === 'page_view').reduce((summary, event) => { summary[event.page] = (summary[event.page] || 0) + 1; return summary; }, {});
   res.json({ totals, pages, recent: events.slice(0, 50) });
+});
+
+app.post('/api/admin/enquiries/:id/publish-free', async (req, res) => {
+  const adminKey = process.env.ADMIN_KEY;
+  if (!adminKey || req.get('x-admin-key') !== adminKey) return res.status(401).json({ error: 'Invalid admin password.' });
+  const checks = req.body?.checks || {};
+  if (!['identity','contact','content'].every(key => checks[key] === true)) return res.status(400).json({ error: 'Confirm identity, contact details and public content before publishing.' });
+  let enquiries = await readEnquiries();
+  let enquiry = enquiries.find(item => String(item.id) === String(req.params.id));
+  const db = getPool();
+  if (!enquiry && db && /^\d+$/.test(req.params.id)) {
+    try {
+      const [rows] = await db.query('SELECT id,contact_name AS contactName,email,phone,package_name AS package,practice_name AS practice,preview_json AS preview,status,created_at AS createdAt FROM enquiries WHERE id = ? LIMIT 1', [req.params.id]);
+      enquiry = rows[0];
+      if (enquiry && typeof enquiry.preview === 'string') { try { enquiry.preview = JSON.parse(enquiry.preview); } catch (_error) { enquiry.preview = {}; } }
+    } catch (_error) { /* File storage remains available. */ }
+  }
+  if (!enquiry) return res.status(404).json({ error: 'Enquiry not found.' });
+  if (enquiry.package !== 'Free Live Website') return res.status(400).json({ error: 'This action is only available for the Free Live Website plan.' });
+  if (enquiry.preview?.onboarding?.verified !== true) return res.status(400).json({ error: 'The customer has not confirmed authority to publish these business details.' });
+  const siteSlug = String(enquiry.preview?.siteSlug || '').replace(/[^a-z0-9-]/g, '');
+  if (!siteSlug) return res.status(400).json({ error: 'The original website preview is unavailable.' });
+  const practices = await readPractices();
+  const profile = practices.find(item => item.slug === siteSlug);
+  if (!profile) return res.status(404).json({ error: 'The website preview record was not found.' });
+  const onboarding = enquiry.preview.onboarding || {};
+  Object.assign(profile, {
+    address: onboarding.address || profile.address || '',
+    hours: onboarding.hours || profile.hours || '',
+    whatsapp: onboarding.businessWhatsapp || profile.whatsapp || profile.phone || '',
+    services: onboarding.services || profile.services || '',
+    qualifications: onboarding.qualifications || profile.qualifications || '',
+    publicationStatus: 'live',
+    verifiedAt: new Date().toISOString(),
+    publishedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+  await writePractices(practices);
+  const workflows = await readWorkflows();
+  const existing = workflows[String(enquiry.id)] || {};
+  const liveUrl = `https://nirolife.com/sites/${siteSlug}`;
+  workflows[String(enquiry.id)] = { ...existing, stage:'live', liveUrl, launchedAt:new Date().toISOString(), launchChecklist:{ domain:true, dns:true, ssl:true, contact:true, forms:true, analytics:true, approval:true, verification:true }, notes:`${existing.notes || ''}\nFree website verified and published on the NiroLife address.`.trim(), updatedAt:new Date().toISOString() };
+  await writeWorkflows(workflows);
+  if (db && /^\d+$/.test(String(enquiry.id))) { try { await db.query('UPDATE enquiries SET status = ? WHERE id = ?', ['won', enquiry.id]); } catch (_error) { /* File record is updated below when present. */ } }
+  const fileEnquiry = enquiries.find(item => String(item.id) === String(enquiry.id));
+  if (fileEnquiry) { fileEnquiry.status = 'won'; await writeEnquiries(enquiries); }
+  const workflow = workflowFor(enquiry.id, workflows, 'won');
+  sendCustomerStatusEmail(enquiry, workflow, 'Your free NiroLife website is live').catch(error => console.error('Free website email failed:', error.message));
+  res.json({ published:true, liveUrl, workflow });
 });
 
 app.patch('/api/admin/enquiries/:id', async (req, res) => {
