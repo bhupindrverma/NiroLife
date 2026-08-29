@@ -12,9 +12,25 @@ const dataDir = path.join(__dirname, 'data');
 const enquiryFile = path.join(dataDir, 'enquiries.json');
 const eventFile = path.join(dataDir, 'events.json');
 const practiceFile = path.join(dataDir, 'practices.json');
+const workflowFile = path.join(dataDir, 'workflows.json');
+const automationFile = path.join(dataDir, 'automation-state.json');
 let enquiryFallback = [];
 let eventFallback = [];
 let practiceFallback = [];
+let workflowFallback = {};
+let automationFallback = {};
+
+const WORKFLOW_STAGES = {
+  manual_review: { label: 'Review enquiry', nextAction: 'Review the preview, package and contact details, then contact the customer.', owner: 'admin', manual: true, legacy: 'new' },
+  awaiting_customer: { label: 'Awaiting customer reply', nextAction: 'Automation waits for the customer to reply or choose the next step.', owner: 'customer', manual: false, legacy: 'contacted' },
+  payment_review: { label: 'Verify payment', nextAction: 'Confirm the payment or payment arrangement, then request onboarding details.', owner: 'admin', manual: true, legacy: 'qualified' },
+  onboarding: { label: 'Customer onboarding', nextAction: 'Customer must provide domain, logo, photos and verified practice details.', owner: 'customer', manual: false, legacy: 'qualified' },
+  content_approval: { label: 'Approve website content', nextAction: 'Review the completed website and request customer approval.', owner: 'admin', manual: true, legacy: 'qualified' },
+  launch_setup: { label: 'Launch setup', nextAction: 'Connect the domain, verify SSL, contact buttons and analytics, then publish.', owner: 'admin', manual: true, legacy: 'won' },
+  live: { label: 'Website live', nextAction: 'Automation monitors the website and starts the maintenance schedule.', owner: 'automation', manual: false, legacy: 'won' },
+  maintenance: { label: 'Managed maintenance', nextAction: 'Continue scheduled updates, checks and reporting.', owner: 'automation', manual: false, legacy: 'won' },
+  closed: { label: 'Closed', nextAction: 'No further action is scheduled.', owner: 'none', manual: false, legacy: 'closed' }
+};
 
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(publicDir, { extensions: ['html'] }));
@@ -89,6 +105,17 @@ async function writeEnquiries(enquiries) {
   catch (_error) { /* Memory fallback keeps the live request working. */ }
 }
 
+async function readWorkflows() { try { return JSON.parse(await fs.readFile(workflowFile, 'utf8')); } catch (_error) { return workflowFallback; } }
+async function writeWorkflows(workflows) { workflowFallback = workflows; try { await fs.mkdir(dataDir, { recursive: true }); await fs.writeFile(workflowFile, JSON.stringify(workflows, null, 2)); } catch (_error) { /* Memory fallback remains available. */ } }
+async function readAutomationState() { try { return JSON.parse(await fs.readFile(automationFile, 'utf8')); } catch (_error) { return automationFallback; } }
+async function writeAutomationState(state) { automationFallback = state; try { await fs.mkdir(dataDir, { recursive: true }); await fs.writeFile(automationFile, JSON.stringify(state, null, 2)); } catch (_error) { /* Best effort. */ } }
+const workflowFor = (id, workflows, fallbackStatus = 'new') => {
+  const savedWorkflow = workflows[String(id)] || {};
+  const fallbackStage = fallbackStatus === 'closed' ? 'closed' : fallbackStatus === 'won' ? 'live' : fallbackStatus === 'contacted' ? 'awaiting_customer' : 'manual_review';
+  const stage = WORKFLOW_STAGES[savedWorkflow.stage] ? savedWorkflow.stage : fallbackStage;
+  return { stage, ...WORKFLOW_STAGES[stage], notes: savedWorkflow.notes || '', followUpAt: savedWorkflow.followUpAt || '', updatedAt: savedWorkflow.updatedAt || '' };
+};
+
 async function readEvents() {
   try { return JSON.parse(await fs.readFile(eventFile, 'utf8')); }
   catch (_error) { return eventFallback; }
@@ -126,9 +153,12 @@ app.post('/api/enquiries', async (req, res) => {
   const enquiry = { id: Date.now().toString(36), contactName, email, phone, package: selectedPackage || 'Not sure yet', practice, type, specialty, city, message: [message, addOns ? `Add-ons: ${addOns}` : ''].filter(Boolean).join('\n'), preview, status: 'new', createdAt: new Date().toISOString() };
   const db = getPool();
   if (db) {
-    try { await db.query('INSERT INTO enquiries (contact_name,email,phone,package_name,practice_name,practice_type,specialty,city,message,preview_json,status) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [contactName, email, phone, enquiry.package, practice, type || '', specialty || '', city || '', message, JSON.stringify(preview), 'new']); }
+    try { const [insertResult] = await db.query('INSERT INTO enquiries (contact_name,email,phone,package_name,practice_name,practice_type,specialty,city,message,preview_json,status) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [contactName, email, phone, enquiry.package, practice, type || '', specialty || '', city || '', enquiry.message, JSON.stringify(preview), 'new']); enquiry.id = String(insertResult.insertId || enquiry.id); }
     catch (_error) { const enquiries = await readEnquiries(); enquiries.unshift(enquiry); await writeEnquiries(enquiries); }
   } else { const enquiries = await readEnquiries(); enquiries.unshift(enquiry); await writeEnquiries(enquiries); }
+  const workflows = await readWorkflows();
+  workflows[String(enquiry.id)] = { stage: 'manual_review', notes: '', followUpAt: '', updatedAt: new Date().toISOString() };
+  await writeWorkflows(workflows);
   sendEnquiryEmails(enquiry).catch(error => console.error('Enquiry email failed:', error.message));
   res.status(201).json({ saved: true, id: enquiry.id, emailQueued: Boolean(process.env.SMTP_HOST && process.env.SMTP_PASSWORD) });
 });
@@ -137,12 +167,20 @@ app.get('/api/admin/enquiries', async (req, res) => {
   const adminKey = process.env.ADMIN_KEY;
   if (!adminKey) return res.status(503).json({ error: 'Admin access is not configured.' });
   if (req.get('x-admin-key') !== adminKey) return res.status(401).json({ error: 'Invalid admin password.' });
+  const workflows = await readWorkflows();
+  const enrich = rows => rows.map(item => ({ ...item, workflow: workflowFor(item.id, workflows, item.status), previewUrl: item.preview?.siteSlug ? `/preview.html?site=${encodeURIComponent(item.preview.siteSlug)}` : '' }));
   const db = getPool();
   if (db) {
-    try { const [rows] = await db.query('SELECT id,contact_name AS contactName,email,phone,package_name AS package,practice_name AS practice,practice_type AS type,specialty,city,message,status,created_at AS createdAt FROM enquiries ORDER BY created_at DESC'); return res.json(rows); }
+    try { const [rows] = await db.query('SELECT id,contact_name AS contactName,email,phone,package_name AS package,practice_name AS practice,practice_type AS type,specialty,city,message,preview_json AS preview,status,created_at AS createdAt FROM enquiries ORDER BY created_at DESC'); rows.forEach(row => { if (typeof row.preview === 'string') { try { row.preview = JSON.parse(row.preview); } catch (_error) { row.preview = {}; } } }); return res.json(enrich(rows)); }
     catch (_error) { /* Fall through to file store. */ }
   }
-  res.json(await readEnquiries());
+  res.json(enrich(await readEnquiries()));
+});
+
+app.get('/api/admin/workflow-stages', (req, res) => {
+  const adminKey = process.env.ADMIN_KEY;
+  if (!adminKey || req.get('x-admin-key') !== adminKey) return res.status(401).json({ error: 'Invalid admin password.' });
+  res.json(WORKFLOW_STAGES);
 });
 
 app.get('/api/admin/analytics', async (req, res) => {
@@ -157,14 +195,25 @@ app.get('/api/admin/analytics', async (req, res) => {
 app.patch('/api/admin/enquiries/:id', async (req, res) => {
   const adminKey = process.env.ADMIN_KEY;
   if (!adminKey || req.get('x-admin-key') !== adminKey) return res.status(401).json({ error: 'Invalid admin password.' });
-  const allowed = ['new', 'contacted', 'qualified', 'won', 'closed'];
-  const status = req.body?.status;
-  if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid lead status.' });
+  const requestedStage = req.body?.workflowStage;
+  const legacyAllowed = ['new', 'contacted', 'qualified', 'won', 'closed'];
+  if (requestedStage && !WORKFLOW_STAGES[requestedStage]) return res.status(400).json({ error: 'Invalid workflow stage.' });
+  const status = requestedStage ? WORKFLOW_STAGES[requestedStage].legacy : req.body?.status;
+  if (!legacyAllowed.includes(status)) return res.status(400).json({ error: 'Invalid lead status.' });
+  const workflows = await readWorkflows();
+  const existing = workflows[String(req.params.id)] || {};
+  workflows[String(req.params.id)] = {
+    stage: requestedStage || workflowFor(req.params.id, workflows, status).stage,
+    notes: typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 2000) : existing.notes || '',
+    followUpAt: typeof req.body?.followUpAt === 'string' ? req.body.followUpAt.slice(0, 40) : existing.followUpAt || '',
+    updatedAt: new Date().toISOString()
+  };
+  await writeWorkflows(workflows);
   const db = getPool();
   if (db && /^\d+$/.test(req.params.id)) {
     try {
       await db.query('UPDATE enquiries SET status = ? WHERE id = ?', [status, req.params.id]);
-      return res.json({ updated: true });
+      return res.json({ updated: true, workflow: workflowFor(req.params.id, workflows, status) });
     } catch (_error) { /* Fall back to file storage. */ }
   }
   const enquiries = await readEnquiries();
@@ -172,8 +221,32 @@ app.patch('/api/admin/enquiries/:id', async (req, res) => {
   if (!enquiry) return res.status(404).json({ error: 'Enquiry not found.' });
   enquiry.status = status;
   await writeEnquiries(enquiries);
-  res.json({ updated: true });
+  res.json({ updated: true, workflow: workflowFor(req.params.id, workflows, status) });
 });
+
+async function sendManualAttentionDigest() {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD) return;
+  const state = await readAutomationState();
+  const lastSent = state.manualDigestAt ? new Date(state.manualDigestAt).getTime() : 0;
+  if (Date.now() - lastSent < 6 * 60 * 60 * 1000) return;
+  let enquiries = await readEnquiries();
+  const db = getPool();
+  if (db) {
+    try { const [rows] = await db.query('SELECT id,contact_name AS contactName,email,phone,package_name AS package,practice_name AS practice,status,created_at AS createdAt FROM enquiries ORDER BY created_at DESC'); enquiries = rows; } catch (_error) { /* Use file store. */ }
+  }
+  const workflows = await readWorkflows();
+  const waiting = enquiries.map(item => ({ ...item, workflow: workflowFor(item.id, workflows, item.status) })).filter(item => item.workflow.manual);
+  if (!waiting.length) return;
+  const transporter = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } });
+  const adminEmail = process.env.LEAD_EMAIL || process.env.SMTP_USER;
+  const lines = waiting.map((item, index) => `${index + 1}. ${item.practice} — ${item.workflow.label}\nNext: ${item.workflow.nextAction}\nContact: ${item.contactName} · ${item.email} · ${item.phone}\nPackage: ${item.package}`).join('\n\n');
+  await transporter.sendMail({ from: `NiroLife <${process.env.SMTP_USER}>`, to: adminEmail, subject: `${waiting.length} NiroLife customer${waiting.length === 1 ? '' : 's'} need manual attention`, text: `NiroLife workflow reminder\n\nThe following customers are waiting for manual feedback or setup:\n\n${lines}\n\nOpen the private dashboard: https://nirolife.com/admin.html` });
+  state.manualDigestAt = new Date().toISOString();
+  await writeAutomationState(state);
+}
+
+setTimeout(() => sendManualAttentionDigest().catch(error => console.error('Manual digest failed:', error.message)), 60 * 1000);
+setInterval(() => sendManualAttentionDigest().catch(error => console.error('Manual digest failed:', error.message)), 60 * 60 * 1000);
 
 app.get('*', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 app.listen(port, () => console.log(`NiroLife listening on port ${port}`));
