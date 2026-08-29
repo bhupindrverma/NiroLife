@@ -121,9 +121,9 @@ app.post('/api/events', async (req, res) => {
 });
 
 app.post('/api/enquiries', async (req, res) => {
-  const { contactName, email, phone, package: selectedPackage, practice, type, specialty, city, message = '', preview = {} } = req.body || {};
+  const { contactName, email, phone, package: selectedPackage, addOns = '', practice, type, specialty, city, message = '', preview = {} } = req.body || {};
   if (!contactName || !email || !phone || !practice) return res.status(400).json({ error: 'Contact name, email, phone and practice are required.' });
-  const enquiry = { id: Date.now().toString(36), contactName, email, phone, package: selectedPackage || 'Not sure yet', practice, type, specialty, city, message, preview, status: 'new', createdAt: new Date().toISOString() };
+  const enquiry = { id: Date.now().toString(36), contactName, email, phone, package: selectedPackage || 'Not sure yet', practice, type, specialty, city, message: [message, addOns ? `Add-ons: ${addOns}` : ''].filter(Boolean).join('\n'), preview, status: 'new', createdAt: new Date().toISOString() };
   const db = getPool();
   if (db) {
     try { await db.query('INSERT INTO enquiries (contact_name,email,phone,package_name,practice_name,practice_type,specialty,city,message,preview_json,status) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [contactName, email, phone, enquiry.package, practice, type || '', specialty || '', city || '', message, JSON.stringify(preview), 'new']); }
