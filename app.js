@@ -1,4 +1,5 @@
 const form = document.getElementById('generatorForm');
+const currencyScript = document.createElement('script'); currencyScript.src = '/currency.js'; document.head.append(currencyScript);
 const modal = document.getElementById('previewModal');
 const modalTitle = document.getElementById('previewTitle');
 const closeModal = () => { modal.classList.remove('open'); modal.setAttribute('aria-hidden', 'true'); };

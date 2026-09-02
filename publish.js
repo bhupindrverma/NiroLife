@@ -1,4 +1,5 @@
 const params = new URLSearchParams(location.search);
+const currencyScript = document.createElement('script'); currencyScript.src = '/currency.js'; document.head.append(currencyScript);
 const siteSlug = params.get('site') || localStorage.getItem('nirolifeSlug') || '';
 const form = document.getElementById('publishForm');
 const steps = [...document.querySelectorAll('.form-step')];
@@ -36,6 +37,9 @@ function validateDetails() {
 }
 function renderReview() {
   const data = new FormData(form); const addOns = data.getAll('addOns');
+  let currencyNote = document.getElementById('reviewCurrency');
+  if (!currencyNote) { currencyNote = document.createElement('p'); currencyNote.id = 'reviewCurrency'; document.getElementById('reviewSummary').after(currencyNote); }
+  currencyNote.textContent = `Preferred quotation currency: ${window.nirolifeCurrency || 'INR'}. Final amount and currency will be confirmed before payment.`;
   document.getElementById('requestNotice').textContent = data.get('package') === 'Free Live Website' ? 'We verify your healthcare business information and public contact details. The website is published on a NiroLife address only after this review and your content approval.' : 'We review your request and contact you to confirm scope, timing and payment. Your website is not published automatically.';
   document.getElementById('reviewSummary').innerHTML = `<div><small>Selected plan</small><strong>${clean(data.get('package'))}</strong><span>${addOns.length ? clean(addOns.join(' + ')) : 'No optional add-ons'}</span></div><div><small>Practice</small><strong>${clean(practice.practice || 'Your practice')}</strong><span>${clean(data.get('ownerName'))}${data.get('qualifications') ? ` · ${clean(data.get('qualifications'))}` : ''}</span></div><div><small>Contact</small><strong>${clean(data.get('contactName'))}</strong><span>${clean(data.get('email'))} · ${clean(data.get('phone'))}</span></div><div><small>Launch information</small><strong>${clean(data.get('domain') || 'Domain to be decided')}</strong><span>${clean(data.get('address'))}</span></div>`;
 }
@@ -50,6 +54,7 @@ form.addEventListener('submit', async event => {
   const onboarding = { domain: data.get('domain'), ownerName: data.get('ownerName'), qualifications: data.get('qualifications'), address: data.get('address'), hours: data.get('hours'), businessWhatsapp: data.get('businessWhatsapp'), services: data.get('services'), assetsUrl: data.get('assetsUrl'), verified: Boolean(data.get('verified')) };
   const payload = { contactName: data.get('contactName'), email: data.get('email'), phone: data.get('phone'), package: data.get('package'), addOns: data.getAll('addOns').join(', '), practice: practice.practice || 'Website preview', type: practice.type || '', specialty: practice.specialty || practice.type || '', city: practice.city || '', message: data.get('message'), onboarding, preview: { ...practice, siteSlug } };
   try {
+    payload.currency = window.nirolifeCurrency || 'INR';
     const response = await fetch('/api/enquiries', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Unable to submit your request.');
     steps[2].classList.remove('active'); document.querySelector('.steps').hidden = true; document.getElementById('successPanel').hidden = false;

@@ -59,6 +59,23 @@ app.use((req, res, next) => {
 app.use(express.static(publicDir, { extensions: ['html'] }));
 
 let pool;
+let exchangeCache = null;
+let exchangeRequest = null;
+app.get('/api/exchange-rates', async (_req, res) => {
+  if (!exchangeCache || Date.now() - exchangeCache.fetchedAt > 86400000) {
+    if (!exchangeRequest) exchangeRequest = (async () => {
+      const response = await fetch('https://api.frankfurter.dev/v2/rates?base=INR&quotes=USD,GBP,EUR', { signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw Error('Rate provider unavailable');
+      const rows = await response.json(); const rates = { INR:1 };
+      for (const row of rows) if (['USD','GBP','EUR'].includes(row.quote) && row.base === 'INR' && Number.isFinite(row.rate) && row.rate > 0) rates[row.quote] = row.rate;
+      if (Object.keys(rates).length !== 4) throw Error('Incomplete rates');
+      exchangeCache = { rates, date:rows[0].date, fetchedAt:Date.now() };
+    })().finally(() => { exchangeRequest = null; });
+    try { await exchangeRequest; } catch (_) {}
+  }
+  if (!exchangeCache || Date.now()-exchangeCache.fetchedAt > 7*86400000) return res.status(503).json({ rates:{INR:1} });
+  res.set('Cache-Control','public, max-age=3600').json({ rates:exchangeCache.rates, date:exchangeCache.date });
+});
 function getPool() {
   if (!pool && process.env.DB_HOST) {
     pool = mysql.createPool({
@@ -268,6 +285,10 @@ app.post('/api/enquiries', async (req, res) => {
   if (selected !== 'Free Preview' && !safeOnboarding.verified) return res.status(400).json({ error: 'Please confirm that the submitted business information is authorised and accurate.' });
   const enquiry = { id: Date.now().toString(36), contactName: String(contactName).slice(0,120), email: String(email).slice(0,180), phone: String(phone).slice(0,60), package: String(selected).slice(0,80), practice: String(practice).slice(0,180), type, specialty, city, message: [String(message).slice(0,1500), addOns ? `Add-ons: ${String(addOns).slice(0,500)}` : ''].filter(Boolean).join('\n'), preview: { ...preview, onboarding: safeOnboarding }, status: 'new', createdAt: new Date().toISOString() };
   const db = getPool();
+  // Currency is a quotation preference only; no client-supplied amount is accepted.
+  const preferredCurrency = ['INR','USD','GBP','EUR'].includes(req.body.currency) ? req.body.currency : 'INR';
+  enquiry.preview.currency = preferredCurrency;
+  enquiry.message += `\nPreferred quotation currency: ${preferredCurrency}. Converted website prices are estimates, not a payment amount.`;
   if (db) {
     try { const [insertResult] = await db.query('INSERT INTO enquiries (contact_name,email,phone,package_name,practice_name,practice_type,specialty,city,message,preview_json,status) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [enquiry.contactName, enquiry.email, enquiry.phone, enquiry.package, enquiry.practice, type || '', specialty || '', city || '', enquiry.message, JSON.stringify(enquiry.preview), 'new']); enquiry.id = String(insertResult.insertId || enquiry.id); }
     catch (_error) { const enquiries = await readEnquiries(); enquiries.unshift(enquiry); await writeEnquiries(enquiries); }
