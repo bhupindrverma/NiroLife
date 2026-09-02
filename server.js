@@ -1,5 +1,5 @@
 const path = require('path');
-const { CURRENCIES, REGIONS, paymentDetails } = require('./payment-policy');
+const { CURRENCIES, REGIONS, paymentDetails, DOMESTIC_INSTRUCTIONS } = require('./payment-policy');
 const fs = require('fs/promises');
 const crypto = require('crypto');
 const express = require('express');
@@ -230,7 +230,7 @@ const workflowFor = (id, workflows, fallbackStatus = 'new') => {
   const savedWorkflow = workflows[String(id)] || {};
   const fallbackStage = fallbackStatus === 'closed' ? 'closed' : fallbackStatus === 'won' ? 'live' : fallbackStatus === 'contacted' ? 'awaiting_customer' : 'manual_review';
   const stage = WORKFLOW_STAGES[savedWorkflow.stage] ? savedWorkflow.stage : fallbackStage;
-  return { stage, ...WORKFLOW_STAGES[stage], notes: savedWorkflow.notes || '', followUpAt: savedWorkflow.followUpAt || '', quoteAmount: savedWorkflow.quoteAmount || '', quoteCurrency: savedWorkflow.quoteCurrency || 'INR', billingRegion: savedWorkflow.billingRegion || '', paymentInstructions: savedWorkflow.paymentInstructions || '', paymentReportedAt: savedWorkflow.paymentReportedAt || '', customerToken: savedWorkflow.customerToken || '', finalPreviewUrl: savedWorkflow.finalPreviewUrl || '', revisionFeedback: savedWorkflow.revisionFeedback || '', revisionRequestedAt: savedWorkflow.revisionRequestedAt || '', contentApprovedAt: savedWorkflow.contentApprovedAt || '', launchChecklist: savedWorkflow.launchChecklist || {}, liveUrl: savedWorkflow.liveUrl || '', launchedAt: savedWorkflow.launchedAt || '', updatedAt: savedWorkflow.updatedAt || '' };
+  return { stage, ...WORKFLOW_STAGES[stage], notes: savedWorkflow.notes || '', followUpAt: savedWorkflow.followUpAt || '', quoteAmount: savedWorkflow.quoteAmount || '', quoteCurrency: savedWorkflow.quoteCurrency || 'INR', billingRegion: savedWorkflow.billingRegion || '', paymentInstructions: savedWorkflow.paymentInstructions || DOMESTIC_INSTRUCTIONS, paymentReportedAt: savedWorkflow.paymentReportedAt || '', customerToken: savedWorkflow.customerToken || '', finalPreviewUrl: savedWorkflow.finalPreviewUrl || '', revisionFeedback: savedWorkflow.revisionFeedback || '', revisionRequestedAt: savedWorkflow.revisionRequestedAt || '', contentApprovedAt: savedWorkflow.contentApprovedAt || '', launchChecklist: savedWorkflow.launchChecklist || {}, liveUrl: savedWorkflow.liveUrl || '', launchedAt: savedWorkflow.launchedAt || '', updatedAt: savedWorkflow.updatedAt || '' };
 };
 
 async function readEvents() {
