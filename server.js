@@ -1,4 +1,5 @@
 const path = require('path');
+const { CURRENCIES, REGIONS, paymentDetails } = require('./payment-policy');
 const fs = require('fs/promises');
 const crypto = require('crypto');
 const express = require('express');
@@ -229,7 +230,7 @@ const workflowFor = (id, workflows, fallbackStatus = 'new') => {
   const savedWorkflow = workflows[String(id)] || {};
   const fallbackStage = fallbackStatus === 'closed' ? 'closed' : fallbackStatus === 'won' ? 'live' : fallbackStatus === 'contacted' ? 'awaiting_customer' : 'manual_review';
   const stage = WORKFLOW_STAGES[savedWorkflow.stage] ? savedWorkflow.stage : fallbackStage;
-  return { stage, ...WORKFLOW_STAGES[stage], notes: savedWorkflow.notes || '', followUpAt: savedWorkflow.followUpAt || '', quoteAmount: savedWorkflow.quoteAmount || '', paymentInstructions: savedWorkflow.paymentInstructions || '', paymentReportedAt: savedWorkflow.paymentReportedAt || '', customerToken: savedWorkflow.customerToken || '', finalPreviewUrl: savedWorkflow.finalPreviewUrl || '', revisionFeedback: savedWorkflow.revisionFeedback || '', revisionRequestedAt: savedWorkflow.revisionRequestedAt || '', contentApprovedAt: savedWorkflow.contentApprovedAt || '', launchChecklist: savedWorkflow.launchChecklist || {}, liveUrl: savedWorkflow.liveUrl || '', launchedAt: savedWorkflow.launchedAt || '', updatedAt: savedWorkflow.updatedAt || '' };
+  return { stage, ...WORKFLOW_STAGES[stage], notes: savedWorkflow.notes || '', followUpAt: savedWorkflow.followUpAt || '', quoteAmount: savedWorkflow.quoteAmount || '', quoteCurrency: savedWorkflow.quoteCurrency || 'INR', billingRegion: savedWorkflow.billingRegion || '', paymentInstructions: savedWorkflow.paymentInstructions || '', paymentReportedAt: savedWorkflow.paymentReportedAt || '', customerToken: savedWorkflow.customerToken || '', finalPreviewUrl: savedWorkflow.finalPreviewUrl || '', revisionFeedback: savedWorkflow.revisionFeedback || '', revisionRequestedAt: savedWorkflow.revisionRequestedAt || '', contentApprovedAt: savedWorkflow.contentApprovedAt || '', launchChecklist: savedWorkflow.launchChecklist || {}, liveUrl: savedWorkflow.liveUrl || '', launchedAt: savedWorkflow.launchedAt || '', updatedAt: savedWorkflow.updatedAt || '' };
 };
 
 async function readEvents() {
@@ -257,8 +258,9 @@ async function sendCustomerStatusEmail(enquiry, workflow, subject = 'Your NiroLi
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !enquiry?.email) return false;
   const transporter = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } });
   const statusUrl = `https://nirolife.com/status.html?token=${encodeURIComponent(workflow.customerToken)}`;
-  const quote = workflow.quoteAmount ? `\nConfirmed quotation: ₹${workflow.quoteAmount}` : '';
-  const payment = workflow.paymentInstructions ? `\nPayment instructions: ${workflow.paymentInstructions}` : '';
+  const paymentInfo = paymentDetails(workflow);
+  const quote = workflow.quoteAmount ? `\nConfirmed quotation: ${paymentInfo.quoteCurrency} ${workflow.quoteAmount}` : '';
+  const payment = workflow.quoteAmount ? `\nPayment instructions: ${paymentInfo.paymentInstructions}` : '';
   const live = workflow.liveUrl ? `\nLive website: ${workflow.liveUrl}` : '';
   await transporter.sendMail({ from: `NiroLife <${process.env.SMTP_USER}>`, to: enquiry.email, subject, text: `Hello ${enquiry.contactName},\n\nYour ${enquiry.practice} website request is now at: ${workflow.label}.\n\nNext step: ${workflow.nextAction}${quote}${payment}${live}\n\nTrack your request securely:\n${statusUrl}\n\nNo payment is confirmed until NiroLife manually verifies it.\n\nNiroLife` });
   return true;
@@ -288,6 +290,7 @@ app.post('/api/enquiries', async (req, res) => {
   // Currency is a quotation preference only; no client-supplied amount is accepted.
   const preferredCurrency = ['INR','USD','GBP','EUR'].includes(req.body.currency) ? req.body.currency : 'INR';
   enquiry.preview.currency = preferredCurrency;
+  enquiry.preview.billingRegion = REGIONS.includes(req.body.billingRegion) ? req.body.billingRegion : '';
   enquiry.message += `\nPreferred quotation currency: ${preferredCurrency}. Converted website prices are estimates, not a payment amount.`;
   if (db) {
     try { const [insertResult] = await db.query('INSERT INTO enquiries (contact_name,email,phone,package_name,practice_name,practice_type,specialty,city,message,preview_json,status) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [enquiry.contactName, enquiry.email, enquiry.phone, enquiry.package, enquiry.practice, type || '', specialty || '', city || '', enquiry.message, JSON.stringify(enquiry.preview), 'new']); enquiry.id = String(insertResult.insertId || enquiry.id); }
@@ -296,7 +299,7 @@ app.post('/api/enquiries', async (req, res) => {
   const workflows = await readWorkflows();
   const initialStage = selected === 'Free Live Website' ? 'verification_review' : selected === 'Free Preview' ? 'awaiting_customer' : 'payment_review';
   const customerToken = crypto.randomBytes(24).toString('hex');
-  workflows[String(enquiry.id)] = { stage: initialStage, notes: selected === 'Free Live Website' ? 'Free live website requested. Verify the business, content and contact details before publishing.' : selected === 'Free Preview' ? 'Free preview request saved. No payment required.' : 'Onboarding details received. Confirm scope and payment before starting work.', followUpAt: '', quoteAmount: '', paymentInstructions: '', customerToken, updatedAt: new Date().toISOString() };
+  workflows[String(enquiry.id)] = { stage: initialStage, notes: selected === 'Free Live Website' ? 'Free live website requested. Verify the business, content and contact details before publishing.' : selected === 'Free Preview' ? 'Free preview request saved. No payment required.' : 'Onboarding details received. Confirm scope and payment before starting work.', followUpAt: '', quoteAmount: '', quoteCurrency: preferredCurrency, billingRegion: enquiry.preview.billingRegion, paymentInstructions: '', customerToken, updatedAt: new Date().toISOString() };
   await writeWorkflows(workflows);
   enquiry.statusUrl = `https://nirolife.com/status.html?token=${customerToken}`;
   sendEnquiryEmails(enquiry).catch(error => console.error('Enquiry email failed:', error.message));
@@ -323,20 +326,21 @@ app.get('/api/customer/:token', async (req, res) => {
   if (!customer) return res.status(404).json({ error: 'This private tracking link is invalid or no longer available.' });
   const { enquiry, workflow } = customer;
   const customerInfo = CUSTOMER_STAGE_INFO[workflow.stage] || CUSTOMER_STAGE_INFO.manual_review;
-  res.json({ practice: enquiry.practice, contactName: enquiry.contactName, package: enquiry.package, createdAt: enquiry.createdAt, stage: workflow.stage, label: customerInfo.label, nextAction: customerInfo.nextAction, quoteAmount: workflow.quoteAmount, paymentInstructions: workflow.paymentInstructions, paymentReportedAt: workflow.paymentReportedAt, finalPreviewUrl: workflow.finalPreviewUrl || (enquiry.preview?.siteSlug ? `/preview.html?site=${encodeURIComponent(enquiry.preview.siteSlug)}` : ''), revisionFeedback: workflow.revisionFeedback, contentApprovedAt: workflow.contentApprovedAt, liveUrl: workflow.liveUrl, launchedAt: workflow.launchedAt, previewUrl: enquiry.preview?.siteSlug ? `/preview.html?site=${encodeURIComponent(enquiry.preview.siteSlug)}` : '' });
+  res.json({ practice: enquiry.practice, contactName: enquiry.contactName, package: enquiry.package, createdAt: enquiry.createdAt, stage: workflow.stage, label: customerInfo.label, nextAction: customerInfo.nextAction, quoteAmount: workflow.quoteAmount, ...paymentDetails(workflow), paymentReportedAt: workflow.paymentReportedAt, finalPreviewUrl: workflow.finalPreviewUrl || (enquiry.preview?.siteSlug ? `/preview.html?site=${encodeURIComponent(enquiry.preview.siteSlug)}` : ''), revisionFeedback: workflow.revisionFeedback, contentApprovedAt: workflow.contentApprovedAt, liveUrl: workflow.liveUrl, launchedAt: workflow.launchedAt, previewUrl: enquiry.preview?.siteSlug ? `/preview.html?site=${encodeURIComponent(enquiry.preview.siteSlug)}` : '' });
 });
 
 app.post('/api/customer/:token/payment-reported', async (req, res) => {
   const customer = await findCustomerByToken(req.params.token);
   if (!customer) return res.status(404).json({ error: 'This private tracking link is invalid or no longer available.' });
   if (!customer.workflow.quoteAmount) return res.status(400).json({ error: 'A quotation has not been issued yet.' });
+  if (customer.workflow.stage !== 'payment_review' || !paymentDetails(customer.workflow).paymentReady) return res.status(400).json({ error: 'Please confirm payment instructions with NiroLife before reporting payment.' });
   const reference = typeof req.body?.reference === 'string' ? req.body.reference.replace(/[^a-zA-Z0-9._\- /]/g, '').slice(0, 100) : '';
   const stored = customer.workflows[customer.id];
   stored.stage = 'payment_review'; stored.paymentReportedAt = new Date().toISOString(); stored.notes = `${stored.notes || ''}\nCustomer reported payment${reference ? ` · Reference: ${reference}` : ''}. Verify manually before continuing.`.trim(); stored.updatedAt = new Date().toISOString();
   await writeWorkflows(customer.workflows);
   if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD) {
     const transporter = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 465), secure: Number(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } });
-    transporter.sendMail({ from: `NiroLife <${process.env.SMTP_USER}>`, to: process.env.LEAD_EMAIL || process.env.SMTP_USER, subject: `Payment reported: ${customer.enquiry.practice}`, text: `${customer.enquiry.contactName} reported a payment for ${customer.enquiry.practice}.\nReference: ${reference || 'Not supplied'}\nQuoted amount: ₹${stored.quoteAmount}\n\nVerify it manually in the admin dashboard before moving the customer to onboarding.` }).catch(error => console.error('Payment report email failed:', error.message));
+    transporter.sendMail({ from: `NiroLife <${process.env.SMTP_USER}>`, to: process.env.LEAD_EMAIL || process.env.SMTP_USER, subject: `Payment reported: ${customer.enquiry.practice}`, text: `${customer.enquiry.contactName} reported a payment for ${customer.enquiry.practice}.\nReference: ${reference || 'Not supplied'}\nQuoted amount: ${stored.quoteCurrency || 'INR'} ${stored.quoteAmount}\n\nVerify it manually in the admin dashboard before moving the customer to onboarding.` }).catch(error => console.error('Payment report email failed:', error.message));
   }
   res.json({ reported: true, message: 'Thank you. NiroLife will verify the payment manually.' });
 });
@@ -454,8 +458,17 @@ app.patch('/api/admin/enquiries/:id', async (req, res) => {
   const workflows = await readWorkflows();
   const existing = workflows[String(req.params.id)] || {};
   const previousStage = workflowFor(req.params.id, workflows, status).stage;
-  const quoteAmount = typeof req.body?.quoteAmount === 'string' ? req.body.quoteAmount.replace(/[^0-9,]/g, '').slice(0, 20) : existing.quoteAmount || '';
+  const quoteAmount = typeof req.body?.quoteAmount === 'string' ? req.body.quoteAmount.replace(/,/g, '').trim() : existing.quoteAmount || '';
   const paymentInstructions = typeof req.body?.paymentInstructions === 'string' ? req.body.paymentInstructions.slice(0, 1000) : existing.paymentInstructions || '';
+  const quoteCurrency = req.body.quoteCurrency ?? existing.quoteCurrency ?? 'INR';
+  const billingRegion = req.body.billingRegion ?? existing.billingRegion ?? '';
+  if (!CURRENCIES.includes(quoteCurrency) || (billingRegion && !REGIONS.includes(billingRegion))) return res.status(400).json({ error: 'Invalid quotation currency or billing location.' });
+  if (req.body.quoteAmount !== undefined || req.body.quoteCurrency !== undefined || req.body.billingRegion !== undefined) {
+    if (!/^\d{1,9}(\.\d{1,2})?$/.test(quoteAmount) || Number(quoteAmount) <= 0) return res.status(400).json({ error: 'Enter a positive quotation with at most two decimal places.' });
+    if (!billingRegion || (billingRegion === 'IN' && quoteCurrency !== 'INR') || (billingRegion === 'OVERSEAS' && quoteCurrency === 'INR')) return res.status(400).json({ error: 'Confirm billing location: India uses INR; overseas PayPal quotations use USD, GBP or EUR. Enter the final amount in that currency.' });
+    if (billingRegion === 'IN' && !paymentInstructions.trim()) return res.status(400).json({ error: 'Add domestic payment instructions before issuing this quotation.' });
+    if (existing.paymentReportedAt && (quoteAmount !== existing.quoteAmount || quoteCurrency !== (existing.quoteCurrency || 'INR') || billingRegion !== existing.billingRegion)) return res.status(400).json({ error: 'Payment has already been reported. Review it before changing quotation details.' });
+  }
   const safeUrl = value => typeof value === 'string' && (/^https:\/\//i.test(value) || /^\/[a-z0-9]/i.test(value)) ? value.slice(0, 500) : '';
   const finalPreviewUrl = typeof req.body?.finalPreviewUrl === 'string' ? safeUrl(req.body.finalPreviewUrl) : existing.finalPreviewUrl || '';
   const liveUrl = typeof req.body?.liveUrl === 'string' ? (/^https:\/\//i.test(req.body.liveUrl) ? req.body.liveUrl.slice(0, 500) : '') : existing.liveUrl || '';
@@ -468,6 +481,8 @@ app.patch('/api/admin/enquiries/:id', async (req, res) => {
     notes: typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 2000) : existing.notes || '',
     followUpAt: typeof req.body?.followUpAt === 'string' ? req.body.followUpAt.slice(0, 40) : existing.followUpAt || '',
     quoteAmount,
+    quoteCurrency,
+    billingRegion,
     paymentInstructions,
     paymentReportedAt: existing.paymentReportedAt || '',
     customerToken: existing.customerToken || crypto.randomBytes(24).toString('hex'),

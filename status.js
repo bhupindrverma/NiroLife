@@ -22,8 +22,10 @@ async function loadStatus() {
     el('loading').hidden = true; el('portal').hidden = false; el('practiceName').textContent = data.practice; el('contactName').textContent = data.contactName; el('stageLabel').textContent = data.label; el('packageName').textContent = data.package; el('createdDate').textContent = new Date(data.createdAt).toLocaleDateString(); el('nextAction').textContent = data.nextAction;
     if (data.previewUrl) { el('previewLink').href = data.previewUrl; } else { el('previewLink').hidden = true; }
     renderTimeline(data.stage, data.package);
+    el('paymentForm').hidden = !data.paymentReady;
+    el('paymentForm').elements.reference.placeholder = data.paymentMethod === 'PayPal' ? 'PayPal transaction reference' : 'Payment transaction reference';
     if (data.paymentReportedAt) { el('reportedCard').hidden = false; }
-    else if (data.stage === 'payment_review' && data.quoteAmount) { el('paymentCard').hidden = false; el('quoteAmount').textContent = data.quoteAmount; el('paymentInstructions').textContent = data.paymentInstructions || 'NiroLife will send payment instructions separately.'; }
+    else if (data.stage === 'payment_review' && data.quoteAmount) { el('paymentCard').hidden = false; el('quoteCurrency').textContent = data.quoteCurrency || 'INR'; el('quoteAmount').textContent = data.quoteAmount; el('paymentMethod').textContent = data.paymentMethod || 'Payment instructions'; el('paymentInstructions').textContent = data.paymentInstructions || 'NiroLife will send payment instructions separately.'; }
     if (data.stage === 'content_approval' && data.finalPreviewUrl) { el('approvalCard').hidden=false; el('finalPreviewLink').href=data.finalPreviewUrl; }
     if (data.stage === 'revision_requested') { el('revisionCard').hidden=false; el('revisionText').textContent=data.revisionFeedback || 'Your requested changes are being completed.'; }
     if ((data.stage === 'live' || data.stage === 'maintenance') && data.liveUrl) { el('liveCard').hidden=false; el('liveLink').href=data.liveUrl; }

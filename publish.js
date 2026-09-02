@@ -2,6 +2,7 @@ const params = new URLSearchParams(location.search);
 const currencyScript = document.createElement('script'); currencyScript.src = '/currency.js'; document.head.append(currencyScript);
 const siteSlug = params.get('site') || localStorage.getItem('nirolifeSlug') || '';
 const form = document.getElementById('publishForm');
+form.elements.contactName.closest('label').insertAdjacentHTML('beforebegin', '<label>Billing location<select name="billingRegion" required><option value="">Select your billing location</option><option value="IN">India</option><option value="OVERSEAS">Outside India</option></select><small>This determines available payment methods, independently of your display currency.</small></label>');
 const steps = [...document.querySelectorAll('.form-step')];
 const navSteps = [...document.querySelectorAll('[data-step-nav]')];
 let currentStep = 1;
@@ -55,6 +56,7 @@ form.addEventListener('submit', async event => {
   const payload = { contactName: data.get('contactName'), email: data.get('email'), phone: data.get('phone'), package: data.get('package'), addOns: data.getAll('addOns').join(', '), practice: practice.practice || 'Website preview', type: practice.type || '', specialty: practice.specialty || practice.type || '', city: practice.city || '', message: data.get('message'), onboarding, preview: { ...practice, siteSlug } };
   try {
     payload.currency = window.nirolifeCurrency || 'INR';
+    payload.billingRegion = data.get('billingRegion');
     const response = await fetch('/api/enquiries', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Unable to submit your request.');
     steps[2].classList.remove('active'); document.querySelector('.steps').hidden = true; document.getElementById('successPanel').hidden = false;
