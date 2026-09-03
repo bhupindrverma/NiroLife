@@ -40,7 +40,21 @@ function install(app, getPool) {
   async function db() {
     const pool = getPool();
     if (!pool) throw Error('Database storage is required for subscription tests.');
-    await pool.query('CREATE TABLE IF NOT EXISTS paypal_sandbox_state (state_key VARCHAR(100) PRIMARY KEY, state_json LONGTEXT NOT NULL) ENGINE=InnoDB');
+    try {
+      await pool.query('CREATE TABLE IF NOT EXISTS paypal_sandbox_state (state_key VARCHAR(100) PRIMARY KEY, state_json LONGTEXT NOT NULL) ENGINE=InnoDB');
+    } catch (error) {
+      // Only fixed messages reach the admin; never expose credentials or raw SQL errors.
+      const messages = {
+        ECONNREFUSED: 'Database connection refused. Check the database host and port.',
+        ETIMEDOUT: 'Database connection timed out. Check host connectivity.',
+        ENOTFOUND: 'Database hostname could not be resolved.',
+        ER_ACCESS_DENIED_ERROR: 'Database authentication failed. Check the saved database credentials.',
+        ER_BAD_DB_ERROR: 'Database name was not found.',
+        ER_DBACCESS_DENIED_ERROR: 'Database user does not have access to this database.',
+        ER_TABLEACCESS_DENIED_ERROR: 'Database user is missing table permissions.'
+      };
+      throw Error(messages[error.code] || 'Database storage check failed. Review the database configuration.');
+    }
     return pool;
   }
   async function read(key, fallback = null) {
