@@ -31,11 +31,14 @@
     const available = Number.isFinite(rates[currency]);
     const actual = available ? currency : 'INR';
     templates.forEach(([node,original]) => { node.nodeValue = original.replace(/₹([\d,]+)/g, (_,amount) => {
-      const value = Math.round(Number(amount.replace(/,/g,'')) * rates[actual]);
-      return new Intl.NumberFormat('en', { style:'currency', currency:actual, currencyDisplay:'code', maximumFractionDigits:0 }).format(value);
+      const baseAmount = Number(amount.replace(/,/g,''));
+      const fixedMonthly = baseAmount === 1999;
+      const priceCurrency = fixedMonthly ? currency : actual;
+      const value = fixedMonthly ? ({INR:1999,USD:29,GBP:25,EUR:29})[currency] : Math.round(baseAmount * rates[actual]);
+      return new Intl.NumberFormat('en', { style:'currency', currency:priceCurrency, currencyDisplay:'code', maximumFractionDigits:0 }).format(value);
     }); });
     note.textContent = !available ? `Conversion unavailable: showing INR. Your preferred quotation currency is ${currency}.` : actual === 'INR' ? 'Base prices in INR. Final scope and charges are confirmed in your quotation.' : `Approximate converted prices${date ? ` · rates dated ${date}` : ''}. Final currency and amount are confirmed in your quotation.`;
-    note.textContent += ' Currency is suggested from device settings; you can change it.';
+    note.textContent += ' Managed Website monthly prices are fixed: INR 1,999 / USD 29 / GBP 25 / EUR 29; setup and add-ons are separate. Automatic renewals are not yet live. Currency is suggested from device settings; you can change it.';
     window.nirolifeCurrency = currency;
     document.dispatchEvent(new CustomEvent('currencychange',{detail:currency}));
   }

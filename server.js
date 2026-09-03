@@ -50,7 +50,7 @@ const CUSTOMER_STAGE_INFO = {
 
 app.use(express.json({ limit: '100kb' }));
 app.use((req, res, next) => {
-  const blocked = ['/data','/server.js','/schema.sql','/package.json','/readme.md','/deployment.md','/pnpm-lock.yaml'];
+  const blocked = ['/data','/server.js','/paypal-sandbox.js','/schema.sql','/package.json','/readme.md','/deployment.md','/pnpm-lock.yaml'];
   if (blocked.some(item => req.path.toLowerCase() === item || req.path.toLowerCase().startsWith(`${item}/`))) return res.status(404).send('Not found.');
   res.set('X-Content-Type-Options','nosniff');
   res.set('Referrer-Policy','strict-origin-when-cross-origin');
@@ -540,5 +540,6 @@ async function sendManualAttentionDigest() {
 setTimeout(() => sendManualAttentionDigest().catch(error => console.error('Manual digest failed:', error.message)), 60 * 1000);
 setInterval(() => sendManualAttentionDigest().catch(error => console.error('Manual digest failed:', error.message)), 60 * 60 * 1000);
 
+require('./paypal-sandbox').install(app, getPool);
 app.get('*', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 app.listen(port, () => console.log(`NiroLife listening on port ${port}`));

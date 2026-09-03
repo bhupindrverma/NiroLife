@@ -1,4 +1,5 @@
 const adminStyle = document.createElement('link'); adminStyle.rel = 'stylesheet'; adminStyle.href = 'admin-extra.css'; document.head.appendChild(adminStyle);
+const paypalAdminScript = document.createElement('script'); paypalAdminScript.src = '/admin-paypal.js'; document.head.appendChild(paypalAdminScript);
 const keyInput = document.getElementById('adminKey');
 const loginStatus = document.getElementById('loginStatus');
 const board = document.getElementById('workflowBoard');
